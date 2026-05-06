@@ -15,7 +15,8 @@ type RepRecord = {
   durationMs: number | null;
 };
 
-const MAX_WAVEFORM_POINTS = 180;
+const MAX_WAVEFORM_POINTS = 1500;
+const WAVEFORM_POINT_PX = 5;
 const BASELINE_ALPHA = 0.02;
 const SMOOTHING_ALPHA = 0.25;
 const PEAK_THRESHOLD = 1.6;
@@ -33,6 +34,7 @@ export default function Home() {
   const [repDurations, setRepDurations] = useState<RepRecord[]>([]);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const waveformScrollRef = useRef<HTMLDivElement | null>(null);
   const animationRef = useRef<number | null>(null);
   const isRunningRef = useRef(false);
   const baselineRef = useRef<number | null>(null);
@@ -99,6 +101,13 @@ export default function Home() {
     context.stroke();
 
     if (isRunningRef.current) {
+      const scrollContainer = waveformScrollRef.current;
+      if (scrollContainer) {
+        scrollContainer.scrollLeft = scrollContainer.scrollWidth;
+      }
+    }
+
+    if (isRunningRef.current) {
       animationRef.current = window.requestAnimationFrame(drawWaveform);
     }
   }, []);
@@ -111,6 +120,15 @@ export default function Home() {
       animationRef.current = null;
     }
   }, []);
+
+  const resetMeasurement = useCallback(() => {
+    stopMeasurement();
+    resetRuntimeRefs();
+    setCount(0);
+    setLastRepTime(null);
+    setRepDurations([]);
+    setWaveformData([]);
+  }, [resetRuntimeRefs, stopMeasurement]);
 
   const processPeak = useCallback((direction: PeakDirection, now: number) => {
     detectedPeaksRef.current.add(direction);
@@ -253,7 +271,11 @@ export default function Home() {
 
       {errorMessage && <p className={styles.errorMessage} role="alert">{errorMessage}</p>}
 
-      {!isRunning && (
+      {isRunning ? (
+        <button className={styles.stopButtonInline} type="button" onClick={stopMeasurement}>
+          ストップ
+        </button>
+      ) : (
         <button className={styles.startButton} type="button" onClick={startMeasurement}>
           スタート
         </button>
@@ -264,13 +286,19 @@ export default function Home() {
           <span>z軸加速度 波形</span>
           <span>{isRunning ? `${waveformData.length} samples` : sensorPermission === "granted" ? "停止中" : "待機中"}</span>
         </div>
-        <canvas ref={canvasRef} className={styles.waveformCanvas} />
+        <div className={styles.waveformScroll} ref={waveformScrollRef}>
+          <canvas
+            ref={canvasRef}
+            className={styles.waveformCanvas}
+            style={{ width: `${Math.max(320, waveformData.length * WAVEFORM_POINT_PX)}px` }}
+          />
+        </div>
       </section>
 
       <div className={styles.bottomSpacer} />
 
-      <button className={styles.stopButton} type="button" onClick={stopMeasurement} disabled={!isRunning}>
-        ストップ
+      <button className={styles.resetButton} type="button" onClick={resetMeasurement} disabled={!isRunning && count === 0}>
+        リセット
       </button>
     </main>
   );
