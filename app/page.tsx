@@ -1,6 +1,15 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  createSessionId,
+  getInitialAnonKey,
+  getStoredAnonKey,
+  saveKintoteRecord,
+  storeAnonKey,
+  validateKintotePayload,
+} from "../lib/supabaseKintote";
 import styles from "./page.module.css";
 
 type SensorPermission = "unknown" | "granted" | "denied" | "unsupported";
@@ -32,6 +41,12 @@ export default function Home() {
   const [waveformData, setWaveformData] = useState<number[]>([]);
   const [lastRepTime, setLastRepTime] = useState<number | null>(null);
   const [repDurations, setRepDurations] = useState<RepRecord[]>([]);
+  const [sessionId, setSessionId] = useState("");
+  const [parts, setParts] = useState("");
+  const [weight, setWeight] = useState("");
+  const [anonKey, setAnonKey] = useState(getInitialAnonKey);
+  const [saveStatus, setSaveStatus] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const waveformScrollRef = useRef<HTMLDivElement | null>(null);
@@ -234,6 +249,11 @@ export default function Home() {
   }, [drawWaveform, resetRuntimeRefs]);
 
   useEffect(() => {
+    setSessionId(String(createSessionId()));
+    setAnonKey(getStoredAnonKey());
+  }, []);
+
+  useEffect(() => {
     if (!isRunning) return;
     window.addEventListener("devicemotion", handleMotion);
     return () => window.removeEventListener("devicemotion", handleMotion);
@@ -248,6 +268,26 @@ export default function Home() {
     };
   }, []);
 
+  const handleSaveMeasurement = useCallback(async () => {
+    setSaveStatus("");
+
+    try {
+      const payload = validateKintotePayload({ sessionId, parts, count, weight });
+      setIsSaving(true);
+      storeAnonKey(anonKey);
+      await saveKintoteRecord(payload, anonKey);
+      setSaveStatus("Supabaseに保存しました。履歴ページで確認できます。");
+    } catch (error) {
+      setSaveStatus(error instanceof Error ? error.message : "保存に失敗しました。");
+    } finally {
+      setIsSaving(false);
+    }
+  }, [anonKey, count, parts, sessionId, weight]);
+
+  const regenerateSessionId = useCallback(() => {
+    setSessionId(String(createSessionId()));
+  }, []);
+
   const latestDuration = repDurations.at(-1)?.durationMs;
 
   return (
@@ -257,6 +297,10 @@ export default function Home() {
         <h1 id="app-title" className={styles.title}>筋トレ往復カウンター</h1>
         <p className={styles.description}>画面を上向きにして、スマホを上下に1往復させるたびにカウントします。</p>
       </section>
+
+      <nav className={styles.navLinks} aria-label="ページ移動">
+        <Link href="/history">計測履歴を見る</Link>
+      </nav>
 
       <section className={styles.counterCard} aria-live="polite">
         <div className={styles.statusRow}>
@@ -280,6 +324,70 @@ export default function Home() {
           スタート
         </button>
       )}
+
+      <section className={styles.saveSection} aria-labelledby="save-title">
+        <div className={styles.sectionTitleRow}>
+          <div>
+            <p className={styles.kicker}>Supabase Save</p>
+            <h2 id="save-title" className={styles.sectionTitle}>今回の計測を保存</h2>
+          </div>
+          <span className={styles.saveCount}>{count} 回</span>
+        </div>
+
+        <label className={styles.formLabel}>
+          記録ID（name / int4）
+          <span className={styles.inlineInputGroup}>
+            <input
+              className={styles.textInput}
+              inputMode="numeric"
+              value={sessionId}
+              onChange={(event) => setSessionId(event.target.value)}
+              placeholder="例: 12345"
+            />
+            <button className={styles.smallButton} type="button" onClick={regenerateSessionId}>
+              再発行
+            </button>
+          </span>
+        </label>
+
+        <label className={styles.formLabel}>
+          部位（parts / text）
+          <input
+            className={styles.textInput}
+            value={parts}
+            onChange={(event) => setParts(event.target.value)}
+            placeholder="例: 腕立て、スクワット、腹筋"
+          />
+        </label>
+
+        <label className={styles.formLabel}>
+          重量（weight / int2・任意）
+          <input
+            className={styles.textInput}
+            inputMode="numeric"
+            value={weight}
+            onChange={(event) => setWeight(event.target.value)}
+            placeholder="例: 20（自重なら空欄）"
+          />
+        </label>
+
+        <label className={styles.formLabel}>
+          Supabase anon key
+          <input
+            className={styles.textInput}
+            value={anonKey}
+            onChange={(event) => setAnonKey(event.target.value)}
+            placeholder="Supabase Project Settings > API の anon key"
+            type="password"
+          />
+        </label>
+
+        <button className={styles.saveButton} type="button" onClick={handleSaveMeasurement} disabled={isSaving || count === 0}>
+          {isSaving ? "保存中..." : "Supabaseに保存"}
+        </button>
+        {saveStatus && <p className={styles.saveStatus}>{saveStatus}</p>}
+        <p className={styles.helpText}>API URL はアプリ内で https://uwvkltzkchwqjqznzutg.supabase.co/rest/v1 を使用しています。anon key はこの端末のlocalStorageに保存されます。</p>
+      </section>
 
       <section className={styles.waveformSection} aria-label="z軸加速度の波形">
         <div className={styles.waveformHeader}>
