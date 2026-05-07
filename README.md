@@ -10,9 +10,15 @@
 https://uwvkltzkchwqjqznzutg.supabase.co/rest/v1
 ```
 
-保存・履歴表示には Supabase の **anon key** が必要です。Supabase ダッシュボードの **Project Settings > API > Project API keys > anon public** から取得し、アプリの入力欄に入力してください。入力した anon key はブラウザの `localStorage` に保存されます。
+保存・履歴表示には Supabase の **anon key** が必要です。キーは画面で入力せず、サーバー側の環境変数 `SUPABASE_ANON_KEY` から自動で使用します。
 
-> service_role key はブラウザに入力しないでください。
+ローカル起動時は `.env.local` に次の形式で設定してください（`.env.local` は Git 管理対象外です）。
+
+```bash
+SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+> `sb_secret_...` のような secret key を使う場合もブラウザへ公開しないよう、`NEXT_PUBLIC_` ではなく `SUPABASE_ANON_KEY` に設定してください。
 
 ## `kintote` テーブル
 
