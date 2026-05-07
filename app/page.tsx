@@ -4,10 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createSessionId,
-  getInitialAnonKey,
-  getStoredAnonKey,
   saveKintoteRecord,
-  storeAnonKey,
   validateKintotePayload,
 } from "../lib/supabaseKintote";
 import styles from "./page.module.css";
@@ -44,7 +41,6 @@ export default function Home() {
   const [sessionId, setSessionId] = useState("");
   const [parts, setParts] = useState("");
   const [weight, setWeight] = useState("");
-  const [anonKey, setAnonKey] = useState(getInitialAnonKey);
   const [saveStatus, setSaveStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -250,7 +246,6 @@ export default function Home() {
 
   useEffect(() => {
     setSessionId(String(createSessionId()));
-    setAnonKey(getStoredAnonKey());
   }, []);
 
   useEffect(() => {
@@ -274,15 +269,14 @@ export default function Home() {
     try {
       const payload = validateKintotePayload({ sessionId, parts, count, weight });
       setIsSaving(true);
-      storeAnonKey(anonKey);
-      await saveKintoteRecord(payload, anonKey);
+      await saveKintoteRecord(payload);
       setSaveStatus("Supabaseに保存しました。履歴ページで確認できます。");
     } catch (error) {
       setSaveStatus(error instanceof Error ? error.message : "保存に失敗しました。");
     } finally {
       setIsSaving(false);
     }
-  }, [anonKey, count, parts, sessionId, weight]);
+  }, [count, parts, sessionId, weight]);
 
   const regenerateSessionId = useCallback(() => {
     setSessionId(String(createSessionId()));
@@ -371,22 +365,11 @@ export default function Home() {
           />
         </label>
 
-        <label className={styles.formLabel}>
-          Supabase anon key
-          <input
-            className={styles.textInput}
-            value={anonKey}
-            onChange={(event) => setAnonKey(event.target.value)}
-            placeholder="Supabase Project Settings > API の anon key"
-            type="password"
-          />
-        </label>
-
         <button className={styles.saveButton} type="button" onClick={handleSaveMeasurement} disabled={isSaving || count === 0}>
           {isSaving ? "保存中..." : "Supabaseに保存"}
         </button>
         {saveStatus && <p className={styles.saveStatus}>{saveStatus}</p>}
-        <p className={styles.helpText}>API URL はアプリ内で https://uwvkltzkchwqjqznzutg.supabase.co/rest/v1 を使用しています。anon key はこの端末のlocalStorageに保存されます。</p>
+        <p className={styles.helpText}>Supabase anon key はサーバー側の環境変数から自動で使用されるため、画面で入力する必要はありません。</p>
       </section>
 
       <section className={styles.waveformSection} aria-label="z軸加速度の波形">

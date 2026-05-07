@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchKintoteHistory, getInitialAnonKey, getStoredAnonKey, storeAnonKey, type KintoteRecord } from "../../lib/supabaseKintote";
+import { fetchKintoteHistory, type KintoteRecord } from "../../lib/supabaseKintote";
 import styles from "../page.module.css";
 
 function formatDate(value: string | null) {
@@ -16,14 +16,9 @@ function formatDate(value: string | null) {
 }
 
 export default function HistoryPage() {
-  const [anonKey, setAnonKey] = useState(getInitialAnonKey);
   const [records, setRecords] = useState<KintoteRecord[]>([]);
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
-  useEffect(() => {
-    setAnonKey(getStoredAnonKey());
-  }, []);
 
   const totalCount = useMemo(() => records.reduce((sum, record) => sum + (record.number ?? 0), 0), [records]);
 
@@ -32,8 +27,7 @@ export default function HistoryPage() {
     setIsLoading(true);
 
     try {
-      storeAnonKey(anonKey);
-      const history = await fetchKintoteHistory(anonKey);
+      const history = await fetchKintoteHistory();
       setRecords(history);
       setStatus(history.length ? `${history.length}件の履歴を読み込みました。` : "保存済みの履歴はまだありません。");
     } catch (error) {
@@ -41,21 +35,11 @@ export default function HistoryPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [anonKey]);
+  }, []);
 
   useEffect(() => {
-    const storedKey = getStoredAnonKey();
-    if (!storedKey) return;
-    setAnonKey(storedKey);
-    void fetchKintoteHistory(storedKey)
-      .then((history) => {
-        setRecords(history);
-        setStatus(history.length ? `${history.length}件の履歴を読み込みました。` : "保存済みの履歴はまだありません。");
-      })
-      .catch((error: unknown) => {
-        setStatus(error instanceof Error ? error.message : "履歴の読み込みに失敗しました。");
-      });
-  }, []);
+    void loadHistory();
+  }, [loadHistory]);
 
   return (
     <main className={styles.appShell}>
@@ -72,24 +56,15 @@ export default function HistoryPage() {
       <section className={styles.saveSection} aria-labelledby="history-load-title">
         <div className={styles.sectionTitleRow}>
           <div>
-            <p className={styles.kicker}>API Key</p>
+            <p className={styles.kicker}>Supabase History</p>
             <h2 id="history-load-title" className={styles.sectionTitle}>履歴を読み込む</h2>
           </div>
           <span className={styles.saveCount}>{totalCount} 回</span>
         </div>
-        <label className={styles.formLabel}>
-          Supabase anon key
-          <input
-            className={styles.textInput}
-            value={anonKey}
-            onChange={(event) => setAnonKey(event.target.value)}
-            placeholder="Supabase Project Settings > API の anon key"
-            type="password"
-          />
-        </label>
         <button className={styles.saveButton} type="button" onClick={loadHistory} disabled={isLoading}>
           {isLoading ? "読み込み中..." : "履歴を更新"}
         </button>
+        <p className={styles.helpText}>Supabase anon key はサーバー側の環境変数から自動で使用します。</p>
         {status && <p className={styles.saveStatus}>{status}</p>}
       </section>
 
@@ -106,7 +81,7 @@ export default function HistoryPage() {
             </div>
           </article>
         ))}
-        {!records.length && <p className={styles.emptyState}>anon key を入力して「履歴を更新」を押すと、kintote テーブルの最新100件を表示します。</p>}
+        {!records.length && <p className={styles.emptyState}>「履歴を更新」を押すと、kintote テーブルの最新100件を表示します。</p>}
       </section>
     </main>
   );

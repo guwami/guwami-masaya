@@ -21,23 +21,8 @@ const INT2_MAX = 32767;
 const INT4_MIN = -2147483648;
 const INT4_MAX = 2147483647;
 
-export function getInitialAnonKey() {
-  return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-}
-
-export function getStoredAnonKey() {
-  if (typeof window === "undefined") return getInitialAnonKey();
-  return window.localStorage.getItem("kintote_supabase_anon_key") ?? getInitialAnonKey();
-}
-
-export function storeAnonKey(anonKey: string) {
-  if (typeof window === "undefined") return;
-  const trimmedKey = anonKey.trim();
-  if (trimmedKey) {
-    window.localStorage.setItem("kintote_supabase_anon_key", trimmedKey);
-  } else {
-    window.localStorage.removeItem("kintote_supabase_anon_key");
-  }
+export function getConfiguredSupabaseKey() {
+  return process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 }
 
 export function createSessionId() {
@@ -89,10 +74,10 @@ export function validateKintotePayload(input: {
   };
 }
 
-async function requestKintote<T>(path: string, anonKey: string, init?: RequestInit) {
+export async function requestSupabaseKintote<T>(path: string, anonKey: string, init?: RequestInit) {
   const trimmedKey = anonKey.trim();
   if (!trimmedKey) {
-    throw new Error("Supabase anon key が未設定です。画面の入力欄に anon key を入力してください。");
+    throw new Error("Supabase anon key がサーバーに設定されていません。SUPABASE_ANON_KEY を設定してアプリを再起動してください。");
   }
 
   const response = await fetch(`${SUPABASE_REST_URL}${path}`, {
@@ -113,22 +98,25 @@ async function requestKintote<T>(path: string, anonKey: string, init?: RequestIn
   return (await response.json()) as T;
 }
 
-export async function saveKintoteRecord(payload: KintotePayload, anonKey: string) {
-  return requestKintote<KintoteRecord[]>("/kintote", anonKey, {
+async function requestKintoteApi<T>(init?: RequestInit) {
+  const response = await fetch("/api/kintote", init);
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `アプリAPIエラー: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+export async function saveKintoteRecord(payload: KintotePayload) {
+  return requestKintoteApi<KintoteRecord[]>({
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Prefer: "return=representation",
     },
     body: JSON.stringify(payload),
   });
 }
 
-export async function fetchKintoteHistory(anonKey: string) {
-  const params = new URLSearchParams({
-    select: "name,parts,number,weight,created_at",
-    order: "created_at.desc",
-    limit: "100",
-  });
-  return requestKintote<KintoteRecord[]>(`/kintote?${params.toString()}`, anonKey);
+export async function fetchKintoteHistory() {
+  return requestKintoteApi<KintoteRecord[]>();
 }
