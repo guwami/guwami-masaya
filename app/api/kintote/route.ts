@@ -3,6 +3,7 @@ import {
   getConfiguredSupabaseKey,
   KintoteApiError,
   requestSupabaseKintote,
+  sanitizeKintotePayload,
   type KintotePayload,
   type KintoteRecord,
 } from "../../../lib/supabaseKintote";
@@ -31,17 +32,24 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const payload = (await request.json()) as KintotePayload;
-    const records = await requestSupabaseKintote<KintoteRecord[]>("/kintote", getConfiguredSupabaseKey(), {
+    const requestPayload = (await request.json()) as KintotePayload;
+    const payload = sanitizeKintotePayload(requestPayload);
+    console.log("Supabase insert payload:", payload);
+
+    const params = new URLSearchParams({
+      select: 'id,"Machine Name","number of set",weight,created_at,"Number of times",part',
+    });
+    const records = await requestSupabaseKintote<KintoteRecord[]>(`/kintote?${params.toString()}`, getConfiguredSupabaseKey(), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Prefer: "return=representation",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify([payload]),
     });
     return NextResponse.json(records);
   } catch (error) {
+    console.error("Supabase保存エラー:", error);
     return kintoteErrorResponse(error, "保存に失敗しました。");
   }
 }
