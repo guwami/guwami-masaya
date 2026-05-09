@@ -20,7 +20,7 @@ export default function HistoryPage() {
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const totalCount = useMemo(() => records.reduce((sum, record) => sum + (record.number ?? 0), 0), [records]);
+  const totalCount = useMemo(() => records.reduce((sum, record) => sum + (record["Number of times"] ?? 0), 0), [records]);
 
   const loadHistory = useCallback(async () => {
     setStatus("");
@@ -70,13 +70,13 @@ export default function HistoryPage() {
 
       <section className={styles.historyList} aria-label="保存済みの計測履歴">
         {records.map((record) => (
-          <article className={styles.historyCard} key={`${record.name}-${record.created_at ?? "no-date"}`}>
+          <article className={styles.historyCard} key={`${record.id}-${record.created_at ?? "no-date"}`}>
             <div>
-              <p className={styles.historyParts}>{record.parts || "部位未入力"}</p>
-              <p className={styles.historyMeta}>ID: {record.name} ・ {formatDate(record.created_at)}</p>
+              <p className={styles.historyParts}>{record.part || "部位未入力"}</p>
+              <p className={styles.historyMeta}>ID: {record.id} ・ {formatDate(record.created_at)}</p>
             </div>
             <div className={styles.historyNumbers}>
-              <span>{record.number}回</span>
+              <span>{record["Number of times"]}回</span>
               <small>{record.weight === null ? "重量なし" : `${record.weight}kg`}</small>
             </div>
           </article>

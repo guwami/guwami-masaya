@@ -1,18 +1,35 @@
 export type KintoteRecord = {
-  name: number;
-  parts: string | null;
-  number: number;
+  id: number;
+  "Machine Name": string | null;
+  "number of set": number | null;
   weight: number | null;
   created_at: string | null;
+  "Number of times": number | null;
+  part: string | null;
 };
 
 export type KintotePayload = {
-  name: number;
-  parts: string;
-  number: number;
-  weight: number | null;
-  created_at: string;
+  "Machine Name": string;
+  "number of set": number;
+  weight: number;
+  "Number of times": number;
+  part: string;
 };
+
+type SupabaseErrorResponse = {
+  message?: string;
+  code?: string;
+};
+
+export class KintoteApiError extends Error {
+  code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "KintoteApiError";
+    this.code = code;
+  }
+}
 
 export const SUPABASE_URL = "https://uwvkltzkchwqjqznzutg.supabase.co";
 export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_keeDzP21zdl7Q79b2DVx7A_tg7UFt12";
@@ -20,8 +37,6 @@ export const SUPABASE_REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 const INT2_MIN = -32768;
 const INT2_MAX = 32767;
-const INT4_MIN = -2147483648;
-const INT4_MAX = 2147483647;
 
 export function getConfiguredSupabaseKey() {
   return (
@@ -30,12 +45,6 @@ export function getConfiguredSupabaseKey() {
     ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     ?? SUPABASE_PUBLISHABLE_KEY
   );
-}
-
-export function createSessionId() {
-  const randomValue = Math.floor(Math.random() * 900_000);
-  const seconds = Math.floor(Date.now() / 1000) % 2_000_000_000;
-  return Math.min(INT4_MAX, seconds + randomValue);
 }
 
 export function parseIntegerField(value: string, fieldName: string, min: number, max: number) {
@@ -52,20 +61,38 @@ export function parseIntegerField(value: string, fieldName: string, min: number,
   return parsedValue;
 }
 
-export function parseOptionalIntegerField(value: string, fieldName: string, min: number, max: number) {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) return null;
-  return parseIntegerField(trimmedValue, fieldName, min, max);
+export function parseKintoteErrorMessage(error: unknown) {
+  if (error instanceof KintoteApiError) {
+    return error.code ? `${error.message} (code: ${error.code})` : error.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "保存に失敗しました。";
 }
 
 export function validateKintotePayload(input: {
-  sessionId: string;
-  parts: string;
-  count: number;
+  selectedMachineName: string;
+  setCount: number;
   weight: string;
+  count: number;
+  selectedPart: string;
 }): KintotePayload {
-  if (!input.parts.trim()) {
+  const selectedMachineName = input.selectedMachineName.trim();
+  const selectedPart = input.selectedPart.trim();
+
+  if (!selectedMachineName) {
+    throw new Error("マシン名を入力してください。");
+  }
+
+  if (!selectedPart) {
     throw new Error("部位を入力してください。");
+  }
+
+  if (!Number.isInteger(input.setCount) || input.setCount < 0 || input.setCount > INT2_MAX) {
+    throw new Error(`セット数は0〜${INT2_MAX}の範囲で保存してください。`);
   }
 
   if (!Number.isInteger(input.count) || input.count < 0 || input.count > INT2_MAX) {
@@ -73,12 +100,29 @@ export function validateKintotePayload(input: {
   }
 
   return {
-    name: parseIntegerField(input.sessionId, "記録ID", INT4_MIN, INT4_MAX),
-    parts: input.parts.trim(),
-    number: input.count,
-    weight: parseOptionalIntegerField(input.weight, "重量", INT2_MIN, INT2_MAX),
-    created_at: new Date().toISOString(),
+    "Machine Name": selectedMachineName,
+    "number of set": input.setCount,
+    weight: parseIntegerField(input.weight, "重量", INT2_MIN, INT2_MAX),
+    "Number of times": input.count,
+    part: selectedPart,
   };
+}
+
+async function parseApiErrorResponse(response: Response) {
+  const responseText = await response.text();
+  if (!responseText) {
+    return { message: `Supabase API エラー: ${response.status}` } satisfies SupabaseErrorResponse;
+  }
+
+  try {
+    const parsedResponse = JSON.parse(responseText) as SupabaseErrorResponse;
+    return {
+      message: parsedResponse.message || responseText,
+      code: parsedResponse.code,
+    } satisfies SupabaseErrorResponse;
+  } catch {
+    return { message: responseText } satisfies SupabaseErrorResponse;
+  }
 }
 
 export async function requestSupabaseKintote<T>(path: string, anonKey: string, init?: RequestInit) {
@@ -97,8 +141,8 @@ export async function requestSupabaseKintote<T>(path: string, anonKey: string, i
   });
 
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Supabase API エラー: ${response.status}`);
+    const apiError = await parseApiErrorResponse(response);
+    throw new KintoteApiError(apiError.message || `Supabase API エラー: ${response.status}`, apiError.code);
   }
 
   if (response.status === 204) return null as T;
@@ -108,8 +152,8 @@ export async function requestSupabaseKintote<T>(path: string, anonKey: string, i
 async function requestKintoteApi<T>(init?: RequestInit) {
   const response = await fetch("/api/kintote", init);
   if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `アプリAPIエラー: ${response.status}`);
+    const apiError = await parseApiErrorResponse(response);
+    throw new KintoteApiError(apiError.message || `アプリAPIエラー: ${response.status}`, apiError.code);
   }
   return (await response.json()) as T;
 }

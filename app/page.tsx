@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  createSessionId,
   fetchKintoteHistory,
   saveKintoteRecord,
+  parseKintoteErrorMessage,
   validateKintotePayload,
   type KintoteRecord,
 } from "../lib/supabaseKintote";
@@ -21,7 +21,7 @@ type MotionPermissionEvent = typeof DeviceMotionEvent & {
 };
 
 type Machine = {
-  name: string;
+  machineName: string;
   targets: string;
 };
 
@@ -32,27 +32,27 @@ type AnalysisRow = {
 };
 
 const MACHINES: Machine[] = [
-  { name: "チェストプレス", targets: "胸・上腕三頭筋・肩前部" },
-  { name: "ラットプルダウン", targets: "広背筋・僧帽筋・上腕二頭筋" },
-  { name: "シーテッドロー", targets: "背中全体・広背筋・僧帽筋" },
-  { name: "ショルダープレス", targets: "肩・上腕三頭筋" },
-  { name: "レッグプレス", targets: "太もも・お尻" },
-  { name: "レッグエクステンション", targets: "大腿四頭筋" },
-  { name: "レッグカール", targets: "ハムストリング" },
-  { name: "ヒップアブダクション", targets: "中臀筋・お尻外側" },
-  { name: "ヒップアダクション", targets: "内転筋" },
-  { name: "グルートマシン", targets: "大臀筋" },
-  { name: "アブドミナルクランチ", targets: "腹直筋" },
-  { name: "バックエクステンション", targets: "脊柱起立筋・腰" },
-  { name: "スミスマシン", targets: "全身・種目による" },
-  { name: "ケーブルクロスオーバー", targets: "胸・肩・腕" },
-  { name: "ペックフライ", targets: "胸内側・肩前部" },
-  { name: "アシストチンニング", targets: "広背筋・腕" },
-  { name: "カーフレイズマシン", targets: "ふくらはぎ" },
-  { name: "ハックスクワット", targets: "太もも・お尻" },
-  { name: "ロータリートルソー", targets: "腹斜筋・体幹" },
-  { name: "アームカールマシン", targets: "上腕二頭筋" },
-  { name: "トライセプスエクステンション", targets: "上腕三頭筋" },
+  { machineName: "チェストプレス", targets: "胸・上腕三頭筋・肩前部" },
+  { machineName: "ラットプルダウン", targets: "広背筋・僧帽筋・上腕二頭筋" },
+  { machineName: "シーテッドロー", targets: "背中全体・広背筋・僧帽筋" },
+  { machineName: "ショルダープレス", targets: "肩・上腕三頭筋" },
+  { machineName: "レッグプレス", targets: "太もも・お尻" },
+  { machineName: "レッグエクステンション", targets: "大腿四頭筋" },
+  { machineName: "レッグカール", targets: "ハムストリング" },
+  { machineName: "ヒップアブダクション", targets: "中臀筋・お尻外側" },
+  { machineName: "ヒップアダクション", targets: "内転筋" },
+  { machineName: "グルートマシン", targets: "大臀筋" },
+  { machineName: "アブドミナルクランチ", targets: "腹直筋" },
+  { machineName: "バックエクステンション", targets: "脊柱起立筋・腰" },
+  { machineName: "スミスマシン", targets: "全身・種目による" },
+  { machineName: "ケーブルクロスオーバー", targets: "胸・肩・腕" },
+  { machineName: "ペックフライ", targets: "胸内側・肩前部" },
+  { machineName: "アシストチンニング", targets: "広背筋・腕" },
+  { machineName: "カーフレイズマシン", targets: "ふくらはぎ" },
+  { machineName: "ハックスクワット", targets: "太もも・お尻" },
+  { machineName: "ロータリートルソー", targets: "腹斜筋・体幹" },
+  { machineName: "アームカールマシン", targets: "上腕二頭筋" },
+  { machineName: "トライセプスエクステンション", targets: "上腕三頭筋" },
 ];
 
 const BASELINE_ALPHA = 0.02;
@@ -99,10 +99,6 @@ function formatDate(value: string | null) {
   }).format(date);
 }
 
-function getMachineName(parts: string | null) {
-  if (!parts) return "マシン未設定";
-  return parts.split("（")[0] || parts;
-}
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<AppTab>("home");
@@ -113,7 +109,6 @@ export default function Home() {
   const [continuousCount, setContinuousCount] = useState(0);
   const [sensorPermission, setSensorPermission] = useState<SensorPermission>("unknown");
   const [errorMessage, setErrorMessage] = useState("");
-  const [sessionId, setSessionId] = useState("");
   const [weightIndex, setWeightIndex] = useState(8);
   const [unit, setUnit] = useState<Unit>("kg");
   const [loadLevel, setLoadLevel] = useState<LoadLevel>(1);
@@ -135,7 +130,8 @@ export default function Home() {
 
   const weightOptions = unit === "kg" ? KG_WEIGHTS : LB_WEIGHTS;
   const selectedWeight = weightOptions[weightIndex] ?? weightOptions[0];
-  const machineParts = selectedMachine ? `${selectedMachine.name}（${selectedMachine.targets}）` : "";
+  const selectedMachineName = selectedMachine?.machineName ?? "";
+  const selectedPart = selectedMachine?.targets ?? "";
   const allSetCounts = count > 0 ? [...completedSetCounts, count] : completedSetCounts;
   const totalRepCount = allSetCounts.reduce((sum, setCount) => sum + setCount, 0);
   const loadLevelLabel = useMemo(() => `レベル${loadLevel}`, [loadLevel]);
@@ -148,11 +144,11 @@ export default function Home() {
 
   const analysisRows = useMemo<AnalysisRow[]>(() => {
     const grouped = records.reduce<Record<string, AnalysisRow>>((accumulator, record) => {
-      const machine = getMachineName(record.parts);
+      const machine = record["Machine Name"] || "マシン未設定";
       if (!accumulator[machine]) {
         accumulator[machine] = { machine, total: 0, sessions: 0 };
       }
-      accumulator[machine].total += record.number ?? 0;
+      accumulator[machine].total += record["Number of times"] ?? 0;
       accumulator[machine].sessions += 1;
       return accumulator;
     }, {});
@@ -362,21 +358,30 @@ export default function Home() {
 
     try {
       const payload = validateKintotePayload({
-        sessionId,
-        parts: machineParts,
-        count: totalRepCount,
+        selectedMachineName,
+        setCount: allSetCounts.length,
         weight: String(Math.round(selectedWeight)),
+        count: totalRepCount,
+        selectedPart,
       });
       setIsSaving(true);
       await saveKintoteRecord(payload);
-      setSaveStatus(`Supabaseに${allSetCounts.length}セット・合計${totalRepCount}回を保存しました。`);
+      setSaveStatus("保存しました");
       await loadHistory();
     } catch (error) {
-      setSaveStatus(error instanceof Error ? error.message : "保存に失敗しました。");
+      console.error("Supabase保存エラー:", error);
+      setSaveStatus(parseKintoteErrorMessage(error));
     } finally {
       setIsSaving(false);
     }
-  }, [allSetCounts.length, loadHistory, machineParts, selectedWeight, sessionId, totalRepCount]);
+  }, [allSetCounts.length, loadHistory, selectedMachineName, selectedPart, selectedWeight, totalRepCount]);
+
+  const handleStopMeasurement = useCallback(() => {
+    stopMeasurement();
+    if (totalRepCount > 0) {
+      void handleSaveMeasurement();
+    }
+  }, [handleSaveMeasurement, stopMeasurement, totalRepCount]);
 
   const handleSelectMachine = useCallback((machine: Machine) => {
     setSelectedMachine(machine);
@@ -392,7 +397,6 @@ export default function Home() {
   }, [loadHistory]);
 
   useEffect(() => {
-    setSessionId(String(createSessionId()));
     void loadHistory();
   }, [loadHistory]);
 
@@ -438,10 +442,10 @@ export default function Home() {
               <button
                 className={styles.machineButton}
                 type="button"
-                key={machine.name}
+                key={machine.machineName}
                 onClick={() => handleSelectMachine(machine)}
               >
-                <span>{machine.name}</span>
+                <span>{machine.machineName}</span>
                 <small>{machine.targets}</small>
               </button>
             ))}
@@ -453,7 +457,7 @@ export default function Home() {
         <section className={styles.measurePanel} aria-labelledby="measure-title">
           <header className={styles.measureHeader}>
             <p className={styles.kicker}>Measurement</p>
-            <h1 id="measure-title" className={styles.measureTitle}>{selectedMachine?.name ?? "マシン未選択"}</h1>
+            <h1 id="measure-title" className={styles.measureTitle}>{selectedMachine?.machineName ?? "マシン未選択"}</h1>
             <p className={styles.description}>{selectedMachine?.targets ?? "ホームタブでマシンを選択してください。"}</p>
           </header>
 
@@ -516,7 +520,7 @@ export default function Home() {
             <button
               className={isRunning ? styles.stopButtonInline : styles.startButton}
               type="button"
-              onClick={isRunning ? stopMeasurement : startMeasurement}
+              onClick={isRunning ? handleStopMeasurement : startMeasurement}
               disabled={!selectedMachine}
             >
               {isRunning ? "ストップ" : "スタート"}
@@ -543,14 +547,14 @@ export default function Home() {
           {historyStatus && <p className={styles.saveStatus}>{historyStatus}</p>}
           <div className={styles.historyList} aria-label="保存したデータ一覧">
             {records.map((record) => (
-              <article className={styles.historyCard} key={`${record.name}-${record.created_at ?? "no-date"}`}>
+              <article className={styles.historyCard} key={`${record.id}-${record.created_at ?? "no-date"}`}>
                 <div>
-                  <p className={styles.historyParts}>{getMachineName(record.parts)}</p>
-                  <p className={styles.historyMeta}>{record.parts || "部位未入力"}</p>
-                  <p className={styles.historyMeta}>ID: {record.name} ・ {formatDate(record.created_at)}</p>
+                  <p className={styles.historyParts}>{record["Machine Name"] || "マシン未設定"}</p>
+                  <p className={styles.historyMeta}>{record.part || "部位未入力"}</p>
+                  <p className={styles.historyMeta}>ID: {record.id} ・ {formatDate(record.created_at)}</p>
                 </div>
                 <div className={styles.historyNumbers}>
-                  <span>{record.number}回</span>
+                  <span>{record["Number of times"]}回</span>
                   <small>{record.weight === null ? "重量なし" : `${record.weight}kg`}</small>
                 </div>
               </article>
