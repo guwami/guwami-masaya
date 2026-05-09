@@ -1,11 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSessionId,
+  fetchKintoteHistory,
   saveKintoteRecord,
   validateKintotePayload,
+  type KintoteRecord,
 } from "../lib/supabaseKintote";
 import styles from "./page.module.css";
 
@@ -13,6 +14,7 @@ type SensorPermission = "unknown" | "granted" | "denied" | "unsupported";
 type PeakDirection = "up" | "down";
 type Unit = "kg" | "lb";
 type LoadLevel = 1 | 2 | 3 | 4 | 5;
+type AppTab = "home" | "measure" | "data" | "analysis";
 
 type MotionPermissionEvent = typeof DeviceMotionEvent & {
   requestPermission?: () => Promise<"granted" | "denied">;
@@ -21,6 +23,12 @@ type MotionPermissionEvent = typeof DeviceMotionEvent & {
 type Machine = {
   name: string;
   targets: string;
+};
+
+type AnalysisRow = {
+  machine: string;
+  total: number;
+  sessions: number;
 };
 
 const MACHINES: Machine[] = [
@@ -81,11 +89,27 @@ const getLoadLevel = (loadScore: number): LoadLevel => {
   return 1;
 };
 
+function formatDate(value: string | null) {
+  if (!value) return "日時なし";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ja-JP", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function getMachineName(parts: string | null) {
+  if (!parts) return "マシン未設定";
+  return parts.split("（")[0] || parts;
+}
+
 export default function Home() {
+  const [activeTab, setActiveTab] = useState<AppTab>("home");
   const [selectedMachine, setSelectedMachine] = useState<Machine | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [count, setCount] = useState(0);
-  const [setsCompleted, setSetsCompleted] = useState(0);
+  const [completedSetCounts, setCompletedSetCounts] = useState<number[]>([]);
   const [continuousCount, setContinuousCount] = useState(0);
   const [sensorPermission, setSensorPermission] = useState<SensorPermission>("unknown");
   const [errorMessage, setErrorMessage] = useState("");
@@ -95,6 +119,9 @@ export default function Home() {
   const [loadLevel, setLoadLevel] = useState<LoadLevel>(1);
   const [saveStatus, setSaveStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [records, setRecords] = useState<KintoteRecord[]>([]);
+  const [historyStatus, setHistoryStatus] = useState("");
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
 
   const isRunningRef = useRef(false);
   const baselineRef = useRef<number | null>(null);
@@ -109,8 +136,30 @@ export default function Home() {
   const weightOptions = unit === "kg" ? KG_WEIGHTS : LB_WEIGHTS;
   const selectedWeight = weightOptions[weightIndex] ?? weightOptions[0];
   const machineParts = selectedMachine ? `${selectedMachine.name}（${selectedMachine.targets}）` : "";
-
+  const allSetCounts = count > 0 ? [...completedSetCounts, count] : completedSetCounts;
+  const totalRepCount = allSetCounts.reduce((sum, setCount) => sum + setCount, 0);
   const loadLevelLabel = useMemo(() => `レベル${loadLevel}`, [loadLevel]);
+  const tabs: { key: AppTab; label: string }[] = [
+    { key: "home", label: "ホーム" },
+    { key: "measure", label: "計測" },
+    { key: "data", label: "データ" },
+    { key: "analysis", label: "分析" },
+  ];
+
+  const analysisRows = useMemo<AnalysisRow[]>(() => {
+    const grouped = records.reduce<Record<string, AnalysisRow>>((accumulator, record) => {
+      const machine = getMachineName(record.parts);
+      if (!accumulator[machine]) {
+        accumulator[machine] = { machine, total: 0, sessions: 0 };
+      }
+      accumulator[machine].total += record.number ?? 0;
+      accumulator[machine].sessions += 1;
+      return accumulator;
+    }, {});
+
+    return Object.values(grouped).sort((a, b) => b.total - a.total);
+  }, [records]);
+  const maxAnalysisTotal = Math.max(...analysisRows.map((row) => row.total), 1);
 
   const clearSetTimer = useCallback(() => {
     if (setTimerRef.current !== null) {
@@ -124,8 +173,12 @@ export default function Home() {
     setTimerRef.current = window.setTimeout(() => {
       if (lastRepTimeRef.current === null) return;
 
-      setSetsCompleted((current) => current + 1);
-      setCount(0);
+      setCount((currentCount) => {
+        if (currentCount > 0) {
+          setCompletedSetCounts((currentSets) => [...currentSets, currentCount]);
+        }
+        return 0;
+      });
       setContinuousCount(0);
       setLoadLevel(1);
       detectedPeaksRef.current = new Set();
@@ -157,11 +210,26 @@ export default function Home() {
     stopMeasurement();
     resetRuntimeRefs();
     setCount(0);
-    setSetsCompleted(0);
+    setCompletedSetCounts([]);
     setContinuousCount(0);
     setLoadLevel(1);
     setSaveStatus("");
   }, [resetRuntimeRefs, stopMeasurement]);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryStatus("");
+    setIsHistoryLoading(true);
+
+    try {
+      const history = await fetchKintoteHistory();
+      setRecords(history);
+      setHistoryStatus(history.length ? `${history.length}件のデータを読み込みました。` : "保存済みのデータはまだありません。");
+    } catch (error) {
+      setHistoryStatus(error instanceof Error ? error.message : "データの読み込みに失敗しました。");
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, []);
 
   const processPeak = useCallback(
     (direction: PeakDirection, now: number) => {
@@ -254,6 +322,12 @@ export default function Home() {
     setErrorMessage("");
     setSaveStatus("");
 
+    if (!selectedMachine) {
+      setActiveTab("home");
+      setErrorMessage("先にホームでマシンを選択してください。");
+      return;
+    }
+
     if (typeof window === "undefined" || typeof window.DeviceMotionEvent === "undefined") {
       setSensorPermission("unsupported");
       setErrorMessage("この端末またはブラウザでは加速度センサーを利用できません。");
@@ -281,7 +355,7 @@ export default function Home() {
       setSensorPermission("denied");
       setErrorMessage("センサー権限のリクエスト中にエラーが発生しました。iOS SafariでHTTPS接続から開いてください。");
     }
-  }, [resetMeasurement]);
+  }, [resetMeasurement, selectedMachine]);
 
   const handleSaveMeasurement = useCallback(async () => {
     setSaveStatus("");
@@ -290,32 +364,37 @@ export default function Home() {
       const payload = validateKintotePayload({
         sessionId,
         parts: machineParts,
-        count,
+        count: totalRepCount,
         weight: String(Math.round(selectedWeight)),
       });
       setIsSaving(true);
       await saveKintoteRecord(payload);
-      setSaveStatus("Supabaseに保存しました。履歴ページで確認できます。");
+      setSaveStatus(`Supabaseに${allSetCounts.length}セット・合計${totalRepCount}回を保存しました。`);
+      await loadHistory();
     } catch (error) {
       setSaveStatus(error instanceof Error ? error.message : "保存に失敗しました。");
     } finally {
       setIsSaving(false);
     }
-  }, [count, machineParts, selectedWeight, sessionId]);
+  }, [allSetCounts.length, loadHistory, machineParts, selectedWeight, sessionId, totalRepCount]);
 
   const handleSelectMachine = useCallback((machine: Machine) => {
     setSelectedMachine(machine);
     resetMeasurement();
+    setActiveTab("measure");
   }, [resetMeasurement]);
 
-  const handleBackHome = useCallback(() => {
-    resetMeasurement();
-    setSelectedMachine(null);
-  }, [resetMeasurement]);
+  const handleTabChange = useCallback((tab: AppTab) => {
+    setActiveTab(tab);
+    if (tab === "data" || tab === "analysis") {
+      void loadHistory();
+    }
+  }, [loadHistory]);
 
   useEffect(() => {
     setSessionId(String(createSessionId()));
-  }, []);
+    void loadHistory();
+  }, [loadHistory]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -330,96 +409,184 @@ export default function Home() {
     };
   }, [clearSetTimer]);
 
-  if (!selectedMachine) {
-    return (
-      <main className={styles.appShell}>
-        <section className={styles.hero} aria-labelledby="app-title">
-          <p className={styles.kicker}>Machine Select</p>
-          <h1 id="app-title" className={styles.title}>ホーム</h1>
-          <p className={styles.description}>筋トレのマシンを選択してください。選択すると計測画面へ移動します。</p>
-        </section>
-
-        <nav className={styles.navLinks} aria-label="ページ移動">
-          <Link href="/history">計測履歴を見る</Link>
-        </nav>
-
-        <section className={styles.machineGrid} aria-label="筋トレマシン一覧">
-          {MACHINES.map((machine) => (
-            <button
-              className={styles.machineButton}
-              type="button"
-              key={machine.name}
-              onClick={() => handleSelectMachine(machine)}
-            >
-              <span>{machine.name}</span>
-              <small>{machine.targets}</small>
-            </button>
-          ))}
-        </section>
-      </main>
-    );
-  }
-
   return (
     <main className={styles.appShell}>
-      <section className={styles.measureHeader} aria-labelledby="measure-title">
-        <button className={styles.backButton} type="button" onClick={handleBackHome}>ホームへ</button>
-        <h1 id="measure-title" className={styles.measureTitle}>{selectedMachine.name}</h1>
-        <p className={styles.description}>{selectedMachine.targets}</p>
-      </section>
-
-      <section className={styles.weightPanel} aria-label="重量選択">
-        <label className={styles.dialLabel} htmlFor="weight-dial">
-          <span>重さ</span>
-          <strong>{selectedWeight}{unit}</strong>
-        </label>
-        <div className={styles.weightControls}>
-          <input
-            id="weight-dial"
-            className={styles.weightDial}
-            type="range"
-            min="0"
-            max={weightOptions.length - 1}
-            step="1"
-            value={weightIndex}
-            onChange={(event) => setWeightIndex(Number(event.target.value))}
-          />
+      <nav className={styles.tabBar} aria-label="メインタブ">
+        {tabs.map((tab) => (
           <button
-            className={styles.unitToggle}
+            className={`${styles.tabButton} ${activeTab === tab.key ? styles.tabButtonActive : ""}`}
             type="button"
-            aria-pressed={unit === "lb"}
-            onClick={() => setUnit((current) => (current === "kg" ? "lb" : "kg"))}
+            key={tab.key}
+            onClick={() => handleTabChange(tab.key)}
+            aria-current={activeTab === tab.key ? "page" : undefined}
           >
-            {unit === "kg" ? "kg" : "lb"}
+            {tab.label}
           </button>
-        </div>
-      </section>
+        ))}
+      </nav>
 
-      {errorMessage && <p className={styles.errorMessage} role="alert">{errorMessage}</p>}
+      {activeTab === "home" && (
+        <section className={styles.tabPanel} aria-labelledby="home-title">
+          <div className={styles.hero}>
+            <p className={styles.kicker}>Machine Select</p>
+            <h1 id="home-title" className={styles.title}>ホーム</h1>
+            <p className={styles.description}>筋トレのマシンを選択してください。選択すると計測タブへ移動します。</p>
+          </div>
 
-      <section className={`${styles.measureArea} ${styles[`loadLevel${loadLevel}`]}`} aria-live="polite">
-        <div className={styles.statusRow}>
-          <span className={isRunning ? styles.runningDot : styles.idleDot} />
-          <span>{isRunning ? "計測中" : count > 0 ? "停止中" : "スタート待ち"}</span>
-        </div>
-        <p className={styles.setCount}>セット {setsCompleted}</p>
-        <div className={styles.countNumber}>{count}</div>
-        <p className={styles.loadLabel}>{loadLevelLabel}</p>
-      </section>
+          <div className={styles.machineGrid} aria-label="筋トレマシン一覧">
+            {MACHINES.map((machine) => (
+              <button
+                className={styles.machineButton}
+                type="button"
+                key={machine.name}
+                onClick={() => handleSelectMachine(machine)}
+              >
+                <span>{machine.name}</span>
+                <small>{machine.targets}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
-      <section className={styles.actionArea} aria-label="操作エリア">
-        <button
-          className={isRunning ? styles.stopButtonInline : styles.startButton}
-          type="button"
-          onClick={isRunning ? stopMeasurement : startMeasurement}
-        >
-          {isRunning ? "ストップ" : "スタート"}
-        </button>
-        <button className={styles.saveButton} type="button" onClick={handleSaveMeasurement} disabled={isSaving || count === 0}>
-          {isSaving ? "保存中..." : "保存"}
-        </button>
-        {saveStatus && <p className={styles.saveStatus}>{saveStatus}</p>}
-      </section>
+      {activeTab === "measure" && (
+        <section className={styles.measurePanel} aria-labelledby="measure-title">
+          <header className={styles.measureHeader}>
+            <p className={styles.kicker}>Measurement</p>
+            <h1 id="measure-title" className={styles.measureTitle}>{selectedMachine?.name ?? "マシン未選択"}</h1>
+            <p className={styles.description}>{selectedMachine?.targets ?? "ホームタブでマシンを選択してください。"}</p>
+          </header>
+
+          <section className={styles.weightPanel} aria-label="重量選択">
+            <label className={styles.dialLabel} htmlFor="weight-dial">
+              <span>重さ</span>
+              <strong>{selectedWeight}{unit}</strong>
+            </label>
+            <div className={styles.weightControls}>
+              <input
+                id="weight-dial"
+                className={styles.weightDial}
+                type="range"
+                min="0"
+                max={weightOptions.length - 1}
+                step="1"
+                value={weightIndex}
+                onChange={(event) => setWeightIndex(Number(event.target.value))}
+              />
+              <button
+                className={styles.unitToggle}
+                type="button"
+                aria-pressed={unit === "lb"}
+                onClick={() => setUnit((current) => (current === "kg" ? "lb" : "kg"))}
+              >
+                {unit === "kg" ? "kg" : "lb"}
+              </button>
+            </div>
+          </section>
+
+          {errorMessage && <p className={styles.errorMessage} role="alert">{errorMessage}</p>}
+
+          <section className={`${styles.measureArea} ${styles[`loadLevel${loadLevel}`]}`} aria-live="polite">
+            <div className={styles.statusRow}>
+              <span className={isRunning ? styles.runningDot : styles.idleDot} />
+              <span>{isRunning ? "計測中" : totalRepCount > 0 ? "停止中" : "スタート待ち"}</span>
+            </div>
+            <p className={styles.setCount}>現在 {allSetCounts.length || 1}セット目</p>
+            <div className={styles.countNumber}>{count}</div>
+            <p className={styles.loadLabel}>{loadLevelLabel}</p>
+          </section>
+
+          <section className={styles.setSummary} aria-label="セットごとの回数">
+            {allSetCounts.length ? (
+              allSetCounts.map((setCount, index) => (
+                <div
+                  className={`${styles.setChip} ${index % 2 === 0 ? styles.setChipGreen : styles.setChipRed}`}
+                  key={`${index}-${setCount}`}
+                >
+                  <span>{index + 1}セット</span>
+                  <strong>{setCount}回</strong>
+                </div>
+              ))
+            ) : (
+              <p className={styles.emptyState}>一定時間無検知になると、セットごとの回数がここに表示されます。</p>
+            )}
+          </section>
+
+          <section className={styles.actionArea} aria-label="操作エリア">
+            <button
+              className={isRunning ? styles.stopButtonInline : styles.startButton}
+              type="button"
+              onClick={isRunning ? stopMeasurement : startMeasurement}
+              disabled={!selectedMachine}
+            >
+              {isRunning ? "ストップ" : "スタート"}
+            </button>
+            <button className={styles.saveButton} type="button" onClick={handleSaveMeasurement} disabled={isSaving || totalRepCount === 0 || !selectedMachine}>
+              {isSaving ? "保存中..." : "保存"}
+            </button>
+            {saveStatus && <p className={styles.saveStatus}>{saveStatus}</p>}
+          </section>
+        </section>
+      )}
+
+      {activeTab === "data" && (
+        <section className={styles.tabPanel} aria-labelledby="data-title">
+          <div className={styles.sectionTitleRow}>
+            <div>
+              <p className={styles.kicker}>Saved Data</p>
+              <h1 id="data-title" className={styles.sectionTitle}>データ</h1>
+            </div>
+            <button className={styles.refreshButton} type="button" onClick={loadHistory} disabled={isHistoryLoading}>
+              {isHistoryLoading ? "読込中" : "更新"}
+            </button>
+          </div>
+          {historyStatus && <p className={styles.saveStatus}>{historyStatus}</p>}
+          <div className={styles.historyList} aria-label="保存したデータ一覧">
+            {records.map((record) => (
+              <article className={styles.historyCard} key={`${record.name}-${record.created_at ?? "no-date"}`}>
+                <div>
+                  <p className={styles.historyParts}>{getMachineName(record.parts)}</p>
+                  <p className={styles.historyMeta}>{record.parts || "部位未入力"}</p>
+                  <p className={styles.historyMeta}>ID: {record.name} ・ {formatDate(record.created_at)}</p>
+                </div>
+                <div className={styles.historyNumbers}>
+                  <span>{record.number}回</span>
+                  <small>{record.weight === null ? "重量なし" : `${record.weight}kg`}</small>
+                </div>
+              </article>
+            ))}
+            {!records.length && <p className={styles.emptyState}>保存したデータがここに羅列されます。</p>}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "analysis" && (
+        <section className={styles.tabPanel} aria-labelledby="analysis-title">
+          <div className={styles.sectionTitleRow}>
+            <div>
+              <p className={styles.kicker}>Graph</p>
+              <h1 id="analysis-title" className={styles.sectionTitle}>分析</h1>
+            </div>
+            <button className={styles.refreshButton} type="button" onClick={loadHistory} disabled={isHistoryLoading}>
+              {isHistoryLoading ? "読込中" : "更新"}
+            </button>
+          </div>
+          <div className={styles.analysisList} aria-label="マシンごとの合計回数グラフ">
+            {analysisRows.map((row) => (
+              <article className={styles.analysisCard} key={row.machine}>
+                <div className={styles.analysisMeta}>
+                  <strong>{row.machine}</strong>
+                  <span>{row.sessions}回保存 / 合計{row.total}回</span>
+                </div>
+                <div className={styles.barTrack} aria-hidden="true">
+                  <div className={styles.barFill} style={{ width: `${Math.max((row.total / maxAnalysisTotal) * 100, 6)}%` }} />
+                </div>
+              </article>
+            ))}
+            {!analysisRows.length && <p className={styles.emptyState}>保存すると、マシンごとの合計回数がグラフで表示されます。</p>}
+          </div>
+        </section>
+      )}
     </main>
   );
 }

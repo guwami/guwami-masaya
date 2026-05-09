@@ -14,7 +14,9 @@ export type KintotePayload = {
   created_at: string;
 };
 
-export const SUPABASE_REST_URL = "https://uwvkltzkchwqjqznzutg.supabase.co/rest/v1";
+export const SUPABASE_URL = "https://uwvkltzkchwqjqznzutg.supabase.co";
+export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_keeDzP21zdl7Q79b2DVx7A_tg7UFt12";
+export const SUPABASE_REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 const INT2_MIN = -32768;
 const INT2_MAX = 32767;
@@ -22,7 +24,12 @@ const INT4_MIN = -2147483648;
 const INT4_MAX = 2147483647;
 
 export function getConfiguredSupabaseKey() {
-  return process.env.SUPABASE_ANON_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  return (
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+    ?? process.env.SUPABASE_ANON_KEY
+    ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    ?? SUPABASE_PUBLISHABLE_KEY
+  );
 }
 
 export function createSessionId() {
@@ -77,7 +84,7 @@ export function validateKintotePayload(input: {
 export async function requestSupabaseKintote<T>(path: string, anonKey: string, init?: RequestInit) {
   const trimmedKey = anonKey.trim();
   if (!trimmedKey) {
-    throw new Error("Supabase anon key がサーバーに設定されていません。SUPABASE_ANON_KEY を設定してアプリを再起動してください。");
+    throw new Error("Supabase publishable key が設定されていません。");
   }
 
   const response = await fetch(`${SUPABASE_REST_URL}${path}`, {
