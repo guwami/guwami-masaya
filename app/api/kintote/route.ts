@@ -1,22 +1,31 @@
 import { NextResponse } from "next/server";
 import {
   getConfiguredSupabaseKey,
+  KintoteApiError,
   requestSupabaseKintote,
   type KintotePayload,
   type KintoteRecord,
 } from "../../../lib/supabaseKintote";
 
+function kintoteErrorResponse(error: unknown, fallbackMessage: string) {
+  if (error instanceof KintoteApiError) {
+    return NextResponse.json({ message: error.message, code: error.code }, { status: 500 });
+  }
+
+  return NextResponse.json({ message: error instanceof Error ? error.message : fallbackMessage }, { status: 500 });
+}
+
 export async function GET() {
   try {
     const params = new URLSearchParams({
-      select: "name,parts,number,weight,created_at",
+      select: 'id,"Machine Name","number of set",weight,created_at,"Number of times",part',
       order: "created_at.desc",
       limit: "100",
     });
     const records = await requestSupabaseKintote<KintoteRecord[]>(`/kintote?${params.toString()}`, getConfiguredSupabaseKey());
     return NextResponse.json(records);
   } catch (error) {
-    return new NextResponse(error instanceof Error ? error.message : "履歴の読み込みに失敗しました。", { status: 500 });
+    return kintoteErrorResponse(error, "履歴の読み込みに失敗しました。");
   }
 }
 
@@ -33,6 +42,6 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(records);
   } catch (error) {
-    return new NextResponse(error instanceof Error ? error.message : "保存に失敗しました。", { status: 500 });
+    return kintoteErrorResponse(error, "保存に失敗しました。");
   }
 }
