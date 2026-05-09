@@ -364,8 +364,10 @@ export default function Home() {
         count: totalRepCount,
         selectedPart,
       });
+      console.log("Supabase insert payload:", payload);
       setIsSaving(true);
-      await saveKintoteRecord(payload);
+      const data = await saveKintoteRecord(payload);
+      console.log("Supabase保存成功:", data);
       setSaveStatus("保存しました");
       await loadHistory();
     } catch (error) {

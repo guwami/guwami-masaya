@@ -63,7 +63,7 @@ export function parseIntegerField(value: string, fieldName: string, min: number,
 
 export function parseKintoteErrorMessage(error: unknown) {
   if (error instanceof KintoteApiError) {
-    return error.code ? `${error.message} (code: ${error.code})` : error.message;
+    return error.code ? `${error.code}: ${error.message}` : error.message;
   }
 
   if (error instanceof Error) {
@@ -73,6 +73,25 @@ export function parseKintoteErrorMessage(error: unknown) {
   return "保存に失敗しました。";
 }
 
+export function createKintotePayload(input: {
+  selectedMachineName: string;
+  setCount: number;
+  weight: number | string;
+  count: number;
+  selectedPart: string;
+}): KintotePayload {
+  const selectedMachineName = input.selectedMachineName.trim();
+  const selectedPart = input.selectedPart.trim();
+
+  return {
+    "Machine Name": selectedMachineName,
+    "number of set": Number(input.setCount),
+    weight: Number(input.weight),
+    "Number of times": Number(input.count),
+    part: selectedPart,
+  };
+}
+
 export function validateKintotePayload(input: {
   selectedMachineName: string;
   setCount: number;
@@ -80,31 +99,36 @@ export function validateKintotePayload(input: {
   count: number;
   selectedPart: string;
 }): KintotePayload {
-  const selectedMachineName = input.selectedMachineName.trim();
-  const selectedPart = input.selectedPart.trim();
+  const payload = createKintotePayload(input);
 
-  if (!selectedMachineName) {
+  if (!payload["Machine Name"]) {
     throw new Error("マシン名を入力してください。");
   }
 
-  if (!selectedPart) {
+  if (!payload.part) {
     throw new Error("部位を入力してください。");
   }
 
-  if (!Number.isInteger(input.setCount) || input.setCount < 0 || input.setCount > INT2_MAX) {
+  if (!Number.isInteger(payload["number of set"]) || payload["number of set"] < 0 || payload["number of set"] > INT2_MAX) {
     throw new Error(`セット数は0〜${INT2_MAX}の範囲で保存してください。`);
   }
 
-  if (!Number.isInteger(input.count) || input.count < 0 || input.count > INT2_MAX) {
+  if (!Number.isInteger(payload["Number of times"]) || payload["Number of times"] < 0 || payload["Number of times"] > INT2_MAX) {
     throw new Error(`回数は0〜${INT2_MAX}の範囲で保存してください。`);
   }
 
+  payload.weight = parseIntegerField(String(input.weight), "重量", INT2_MIN, INT2_MAX);
+
+  return payload;
+}
+
+export function sanitizeKintotePayload(payload: KintotePayload): KintotePayload {
   return {
-    "Machine Name": selectedMachineName,
-    "number of set": input.setCount,
-    weight: parseIntegerField(input.weight, "重量", INT2_MIN, INT2_MAX),
-    "Number of times": input.count,
-    part: selectedPart,
+    "Machine Name": payload["Machine Name"],
+    "number of set": Number(payload["number of set"]),
+    weight: Number(payload.weight),
+    "Number of times": Number(payload["Number of times"]),
+    part: payload.part,
   };
 }
 

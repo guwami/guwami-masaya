@@ -26,11 +26,13 @@ SUPABASE_ANON_KEY=your_supabase_anon_key
 
 | Supabase列 | 型 | アプリで入力・保存する値 |
 | --- | --- | --- |
-| `name` | `int4` | 記録ID。アプリで自動発行できます。主キー想定のため重複しない値が必要です。 |
-| `parts` | `text` | 部位・種目名。保存前に入力します。 |
-| `number` | `int2` | 計測した回数。カウンターの値を保存します。 |
-| `weight` | `int2` | 重量。任意入力です。自重トレーニングは空欄で保存します。 |
-| `created_at` | `timestamptz` | 保存時刻。アプリが ISO 形式で送信します。 |
+| `id` | `int4` | 記録ID。Supabase 側で自動発行します。 |
+| `Machine Name` | `text` | 選択したマシン名を保存します。 |
+| `number of set` | `int2` | 完了したセット数を保存します。 |
+| `weight` | `int2` | 選択した重量を保存します。 |
+| `Number of times` | `int2` | 計測した合計回数を保存します。 |
+| `part` | `text` | 選択したマシンの対象部位を保存します。 |
+| `created_at` | `timestamptz` | Supabase 側の初期値で保存時刻を記録します。 |
 
 ## Supabase 側で必要な操作
 
