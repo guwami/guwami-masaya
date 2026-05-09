@@ -49,11 +49,11 @@ const MACHINES: Machine[] = [
 
 const BASELINE_ALPHA = 0.02;
 const SMOOTHING_ALPHA = 0.25;
-const PEAK_THRESHOLD = 1.6;
-const RELEASE_THRESHOLD = 0.65;
+const PEAK_THRESHOLD = 2.1;
+const RELEASE_THRESHOLD = 0.75;
 const MIN_REP_INTERVAL_MS = 450;
-const SET_IDLE_MS = 15_000;
-const MICRO_MOVEMENT_THRESHOLD = 0.55;
+const SET_IDLE_MS = 10_000;
+const MICRO_MOVEMENT_THRESHOLD = 0.9;
 const KG_WEIGHTS = Array.from({ length: 41 }, (_, index) => index * 2.5);
 const LB_WEIGHTS = Array.from({ length: 41 }, (_, index) => index * 5);
 
@@ -93,10 +93,6 @@ export default function Home() {
   const [weightIndex, setWeightIndex] = useState(8);
   const [unit, setUnit] = useState<Unit>("kg");
   const [loadLevel, setLoadLevel] = useState<LoadLevel>(1);
-  const [accelerationScore, setAccelerationScore] = useState(1);
-  const [countScore, setCountScore] = useState(1);
-  const [accelerationRatio, setAccelerationRatio] = useState(0);
-  const [loadScore, setLoadScore] = useState(1);
   const [saveStatus, setSaveStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -127,9 +123,15 @@ export default function Home() {
     clearSetTimer();
     setTimerRef.current = window.setTimeout(() => {
       if (lastRepTimeRef.current === null) return;
+
       setSetsCompleted((current) => current + 1);
+      setCount(0);
       setContinuousCount(0);
-      setCountScore(1);
+      setLoadLevel(1);
+      detectedPeaksRef.current = new Set();
+      lastRepTimeRef.current = null;
+      currentUpPeakRef.current = 0;
+      currentDownPeakRef.current = 0;
       setTimerRef.current = null;
     }, SET_IDLE_MS);
   }, [clearSetTimer]);
@@ -158,10 +160,6 @@ export default function Home() {
     setSetsCompleted(0);
     setContinuousCount(0);
     setLoadLevel(1);
-    setAccelerationScore(1);
-    setCountScore(1);
-    setAccelerationRatio(0);
-    setLoadScore(1);
     setSaveStatus("");
   }, [resetRuntimeRefs, stopMeasurement]);
 
@@ -180,7 +178,7 @@ export default function Home() {
 
       lastRepTimeRef.current = now;
       detectedPeaksRef.current = new Set();
-      const { ratio, score: nextAccelerationScore } = getAccelerationScore(
+      const { score: nextAccelerationScore } = getAccelerationScore(
         currentUpPeakRef.current,
         currentDownPeakRef.current,
       );
@@ -191,13 +189,9 @@ export default function Home() {
         const nextCountScore = getCountScore(nextContinuousCount);
         const nextLoadScore = nextAccelerationScore * nextCountScore;
 
-        setCountScore(nextCountScore);
-        setLoadScore(nextLoadScore);
         setLoadLevel(getLoadLevel(nextLoadScore));
         return nextContinuousCount;
       });
-      setAccelerationRatio(ratio);
-      setAccelerationScore(nextAccelerationScore);
       currentUpPeakRef.current = 0;
       currentDownPeakRef.current = 0;
       armSetTimer();
@@ -370,8 +364,7 @@ export default function Home() {
     <main className={styles.appShell}>
       <section className={styles.measureHeader} aria-labelledby="measure-title">
         <button className={styles.backButton} type="button" onClick={handleBackHome}>ホームへ</button>
-        <p className={styles.kicker}>Measurement</p>
-        <h1 id="measure-title" className={styles.title}>{selectedMachine.name}</h1>
+        <h1 id="measure-title" className={styles.measureTitle}>{selectedMachine.name}</h1>
         <p className={styles.description}>{selectedMachine.targets}</p>
       </section>
 
@@ -412,11 +405,6 @@ export default function Home() {
         <p className={styles.setCount}>セット {setsCompleted}</p>
         <div className={styles.countNumber}>{count}</div>
         <p className={styles.loadLabel}>{loadLevelLabel}</p>
-        <div className={styles.loadDetails}>
-          <span>加速度 {accelerationScore}（下/上 {accelerationRatio.toFixed(0)}%）</span>
-          <span>連続回数 {continuousCount} → {countScore}</span>
-          <span>負荷 {accelerationScore} × {countScore} = {loadScore}</span>
-        </div>
       </section>
 
       <section className={styles.actionArea} aria-label="操作エリア">
