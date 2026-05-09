@@ -1,6 +1,6 @@
 .appShell {
   min-height: 100dvh;
-  padding: 28px 18px calc(28px + env(safe-area-inset-bottom));
+  padding: 18px 14px calc(18px + env(safe-area-inset-bottom));
   background:
     radial-gradient(circle at top, rgba(14, 165, 233, 0.22), transparent 34rem),
     linear-gradient(180deg, #07111f 0%, #0f172a 100%);
@@ -13,10 +13,12 @@
 
 .measureHeader {
   position: relative;
+  padding-top: 2px;
+  text-align: left;
 }
 
 .kicker {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   color: #67e8f9;
   font-size: 0.78rem;
   font-weight: 800;
@@ -33,10 +35,23 @@
 
 .description {
   max-width: 24rem;
-  margin: 12px auto 0;
+  margin: 8px auto 0;
   color: #cbd5e1;
   font-size: 0.96rem;
   line-height: 1.65;
+}
+
+.measureTitle {
+  margin: 0;
+  color: #f8fafc;
+  font-size: clamp(1.2rem, 5vw, 1.7rem);
+  letter-spacing: -0.03em;
+}
+
+.measureHeader .description {
+  margin-left: 0;
+  font-size: 0.78rem;
+  line-height: 1.35;
 }
 
 .navLinks {
@@ -106,23 +121,24 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
-  margin-bottom: 14px;
-  padding: 0 14px;
+  min-height: 30px;
+  margin: 0 0 8px;
+  padding: 0 10px;
   border: 1px solid rgba(203, 213, 225, 0.22);
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.72);
   color: #dbeafe;
+  font-size: 0.82rem;
   font-weight: 900;
   cursor: pointer;
 }
 
 .weightPanel,
 .actionArea {
-  margin-top: 18px;
-  padding: 16px;
+  margin-top: 10px;
+  padding: 12px;
   border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 24px;
+  border-radius: 18px;
   background: rgba(15, 23, 42, 0.74);
   box-shadow: 0 18px 56px rgba(0, 0, 0, 0.24);
 }
@@ -138,15 +154,15 @@
 
 .dialLabel strong {
   color: #ffffff;
-  font-size: 1.6rem;
+  font-size: 1.2rem;
 }
 
 .weightControls {
   display: grid;
-  grid-template-columns: 1fr 72px;
-  gap: 12px;
+  grid-template-columns: 1fr 54px;
+  gap: 8px;
   align-items: center;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .weightDial {
@@ -155,12 +171,12 @@
 }
 
 .unitToggle {
-  min-height: 46px;
+  min-height: 34px;
   border: 0;
-  border-radius: 16px;
+  border-radius: 12px;
   background: linear-gradient(135deg, #e0f2fe, #67e8f9);
   color: #082f49;
-  font-size: 1rem;
+  font-size: 0.86rem;
   font-weight: 900;
   cursor: pointer;
 }
@@ -168,11 +184,11 @@
 .measureArea {
   display: grid;
   place-items: center;
-  min-height: 42dvh;
-  margin: 18px auto 0;
-  padding: 22px 16px;
+  min-height: 34dvh;
+  margin: 10px auto 0;
+  padding: 14px 12px;
   border: 1px solid rgba(148, 163, 184, 0.22);
-  border-radius: 32px;
+  border-radius: 24px;
   color: #0f172a;
   text-align: center;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
@@ -206,12 +222,12 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  min-height: 30px;
-  padding: 6px 12px;
+  min-height: 26px;
+  padding: 4px 10px;
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.86);
   color: #dbeafe;
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   font-weight: 800;
 }
 
@@ -232,37 +248,28 @@
 }
 
 .setCount {
-  margin: 18px 0 0;
-  font-size: 1rem;
+  margin: 10px 0 0;
+  font-size: 0.9rem;
   font-weight: 900;
   opacity: 0.8;
 }
 
 .countNumber {
-  font-size: clamp(8rem, 42vw, 14rem);
+  font-size: clamp(5.8rem, 32vw, 10rem);
   font-weight: 900;
   line-height: 0.9;
   text-shadow: 0 10px 36px rgba(15, 23, 42, 0.18);
 }
 
 .loadLabel {
-  margin: 8px 0 0;
-  font-size: 1.2rem;
+  margin: 4px 0 0;
+  font-size: 1rem;
   font-weight: 900;
-}
-
-.loadDetails {
-  display: grid;
-  gap: 4px;
-  margin-top: 14px;
-  font-size: 0.82rem;
-  font-weight: 900;
-  opacity: 0.86;
 }
 
 .errorMessage {
-  margin: 14px auto 0;
-  padding: 12px 14px;
+  margin: 10px auto 0;
+  padding: 10px 12px;
   border: 1px solid rgba(248, 113, 113, 0.55);
   border-radius: 16px;
   background: rgba(127, 29, 29, 0.36);
@@ -274,10 +281,10 @@
 .stopButtonInline,
 .saveButton {
   width: 100%;
-  min-height: 58px;
+  min-height: 48px;
   border: 0;
-  border-radius: 20px;
-  font-size: 1.16rem;
+  border-radius: 16px;
+  font-size: 1rem;
   font-weight: 900;
   cursor: pointer;
 }
@@ -295,7 +302,7 @@
 }
 
 .saveButton {
-  margin-top: 12px;
+  margin-top: 8px;
   background: linear-gradient(135deg, #86efac, #22c55e);
   color: #052e16;
   box-shadow: 0 18px 46px rgba(34, 197, 94, 0.22);
