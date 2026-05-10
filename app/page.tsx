@@ -14,7 +14,14 @@ type SensorPermission = "unknown" | "granted" | "denied" | "unsupported";
 type Unit = "kg" | "lb";
 type CurrentLevel = 1 | 2 | 3;
 type MotionPhase = "idle" | "push" | "pull" | "cooldown";
-type RepDuration = { pushDuration: number; pullDuration: number; ratio: number; level: CurrentLevel };
+type RepDuration = {
+  pushDuration: number;
+  pullDuration: number;
+  repDuration: number;
+  eccentricRatio: number;
+  averageLevel: number;
+  level: CurrentLevel;
+};
 type AppTab = "home" | "measure" | "data" | "analysis";
 
 type MotionPermissionEvent = typeof DeviceMotionEvent & {
@@ -69,21 +76,34 @@ const MICRO_MOVEMENT_THRESHOLD = 0.9;
 const KG_WEIGHTS = Array.from({ length: 41 }, (_, index) => index * 2.5);
 const LB_WEIGHTS = Array.from({ length: 41 }, (_, index) => index * 5);
 
-const getRepLevel = (ratio: number): CurrentLevel => {
-  if (ratio >= 2.0) return 3;
-  if (ratio >= 1.5) return 2;
+const getRepLevel = (repDuration: number, eccentricRatio: number): CurrentLevel => {
+  if (repDuration >= 2.5 && eccentricRatio >= 0.65) return 3;
+  if (repDuration >= 1.8 && eccentricRatio >= 0.55) return 2;
   return 1;
 };
 
-const getCurrentLevelFromRecentReps = (levels: CurrentLevel[]): CurrentLevel => {
-  const recentLevels = levels.slice(-3);
+const getRecentAverageLevel = (levels: CurrentLevel[]): number => {
+  const recentLevels = levels.slice(-5);
   if (!recentLevels.length) return 1;
 
-  const averageLevel = recentLevels.reduce((sum, level) => sum + level, 0) / recentLevels.length;
-  if (averageLevel >= 2.0) return 3;
-  if (averageLevel >= 1.5) return 2;
+  return recentLevels.reduce((sum, level) => sum + level, 0) / recentLevels.length;
+};
+
+const getLevelBonus = (count: number): number => {
+  if (count >= 12) return 0.4;
+  if (count >= 8) return 0.2;
+  return 0;
+};
+
+const getSessionLevelFromAverage = (averageLevel: number): CurrentLevel => {
+  const roundedAverageLevel = Math.min(averageLevel, 3);
+  if (roundedAverageLevel >= 2.4) return 3;
+  if (roundedAverageLevel >= 1.5) return 2;
   return 1;
 };
+
+const formatSeconds = (value: number): string => `${value.toFixed(2)}s`;
+const formatRatio = (value: number): string => value.toFixed(2);
 
 function formatDate(value: string | null) {
   if (!value) return "日時なし";
@@ -138,7 +158,14 @@ export default function Home() {
   const selectedPart = selectedMachine?.targets ?? "";
   const allSetCounts = count > 0 ? [...completedSetCounts, count] : completedSetCounts;
   const totalRepCount = allSetCounts.reduce((sum, setCount) => sum + setCount, 0);
-  const currentLevelLabel = useMemo(() => `Level ${currentLevel}`, [currentLevel]);
+  const latestRepDuration = repDurations.at(-1);
+  const recentAverageLevel = useMemo(() => getRecentAverageLevel(repLevels), [repLevels]);
+  const averageLevel = Math.min(recentAverageLevel + getLevelBonus(repLevels.length), 3);
+  const currentLevelLabel = useMemo(() => `Session Level ${currentLevel}`, [currentLevel]);
+  const countAreaColorLevel = Math.min(
+    Math.max(currentLevel + (repLevels.length >= 12 ? 2 : repLevels.length >= 8 ? 1 : 0), 1),
+    5,
+  );
   const tabs: { key: AppTab; label: string }[] = [
     { key: "home", label: "ホーム" },
     { key: "measure", label: "計測" },
@@ -262,23 +289,38 @@ export default function Home() {
         return;
       }
 
-      const ratio = pullDuration / pushDuration;
-      if (!Number.isFinite(ratio)) {
+      const repDuration = (pushDuration + pullDuration) / 1000;
+      const pushDurationSeconds = pushDuration / 1000;
+      const pullDurationSeconds = pullDuration / 1000;
+      const eccentricRatio = pullDurationSeconds / repDuration;
+      if (!Number.isFinite(eccentricRatio)) {
         clearMotionDetectionState();
         return;
       }
 
-      const repLevel = getRepLevel(ratio);
+      const repLevel = getRepLevel(repDuration, eccentricRatio);
       lastRepTimeRef.current = now;
       setCount((currentCount) => currentCount + 1);
-      setRepDurations((currentDurations) => [
-        ...currentDurations,
-        { pushDuration, pullDuration, ratio, level: repLevel },
-      ]);
+      setRepDurations((currentDurations) => {
+        const nextLevels = [...repLevels, repLevel];
+        const nextAverageLevel = Math.min(getRecentAverageLevel(nextLevels) + getLevelBonus(nextLevels.length), 3);
+
+        return [
+          ...currentDurations,
+          {
+            pushDuration: pushDurationSeconds,
+            pullDuration: pullDurationSeconds,
+            repDuration,
+            eccentricRatio,
+            averageLevel: nextAverageLevel,
+            level: repLevel,
+          },
+        ];
+      });
       setLatestRepLevel(repLevel);
       setRepLevels((currentLevels) => {
         const nextLevels = [...currentLevels, repLevel];
-        setCurrentLevel(getCurrentLevelFromRecentReps(nextLevels));
+        setCurrentLevel(getSessionLevelFromAverage(getRecentAverageLevel(nextLevels) + getLevelBonus(nextLevels.length)));
         return nextLevels;
       });
       updateMotionPhase("cooldown");
@@ -288,7 +330,7 @@ export default function Home() {
       pullDurationRef.current = 0;
       armSetTimer();
     },
-    [armSetTimer, clearMotionDetectionState, updateMotionPhase],
+    [armSetTimer, clearMotionDetectionState, repLevels, updateMotionPhase],
   );
 
   const handleMotion = useCallback(
@@ -596,7 +638,7 @@ export default function Home() {
 
           {errorMessage && <p className={styles.errorMessage} role="alert">{errorMessage}</p>}
 
-          <section className={`${styles.measureArea} ${styles[`loadLevel${currentLevel}`]}`} aria-live="polite">
+          <section className={`${styles.measureArea} ${styles[`loadLevel${countAreaColorLevel}`]}`} aria-live="polite">
             <canvas ref={canvasRef} className={styles.waveformCanvas} aria-hidden="true" />
             <div className={styles.measureContent}>
               <div className={styles.statusRow}>
@@ -606,7 +648,19 @@ export default function Home() {
               <p className={styles.setCount}>現在 {allSetCounts.length || 1}セット目</p>
               <div className={styles.countNumber}>{count}</div>
               <p className={styles.loadLabel}>{currentLevelLabel}</p>
-              <p className={styles.repLevelLabel}>最新rep：Level {latestRepLevel}</p>
+              <div className={styles.repMetrics} aria-label="最新repの指標">
+                <span>最新rep：Level {latestRepLevel}</span>
+                <span>repDuration：{latestRepDuration ? formatSeconds(latestRepDuration.repDuration) : "--"}</span>
+                <span>eccentricRatio：{latestRepDuration ? formatRatio(latestRepDuration.eccentricRatio) : "--"}</span>
+                <span>直近5rep平均：{formatRatio(recentAverageLevel)}</span>
+              </div>
+              <div className={styles.debugMetrics} aria-label="デバッグ指標">
+                <span>pushDuration: {latestRepDuration ? formatSeconds(latestRepDuration.pushDuration) : "--"}</span>
+                <span>pullDuration: {latestRepDuration ? formatSeconds(latestRepDuration.pullDuration) : "--"}</span>
+                <span>repDuration: {latestRepDuration ? formatSeconds(latestRepDuration.repDuration) : "--"}</span>
+                <span>eccentricRatio: {latestRepDuration ? formatRatio(latestRepDuration.eccentricRatio) : "--"}</span>
+                <span>averageLevel: {formatRatio(averageLevel)}</span>
+              </div>
             </div>
           </section>
 
