@@ -11,9 +11,10 @@ import {
 import styles from "./page.module.css";
 
 type SensorPermission = "unknown" | "granted" | "denied" | "unsupported";
-type PeakDirection = "up" | "down";
 type Unit = "kg" | "lb";
-type LoadLevel = 1 | 2 | 3 | 4 | 5;
+type CurrentLevel = 1 | 2 | 3;
+type MotionPhase = "idle" | "push" | "pull" | "cooldown";
+type RepDuration = { pushDuration: number; pullDuration: number; ratio: number; level: CurrentLevel };
 type AppTab = "home" | "measure" | "data" | "analysis";
 
 type MotionPermissionEvent = typeof DeviceMotionEvent & {
@@ -60,32 +61,27 @@ const SMOOTHING_ALPHA = 0.25;
 const PEAK_THRESHOLD = 2.1;
 const RELEASE_THRESHOLD = 0.75;
 const MIN_REP_INTERVAL_MS = 450;
+const MIN_PHASE_DURATION_MS = 120;
+const MIN_PUSH_DURATION_MS = 80;
+const WAVEFORM_MAX_POINTS = 96;
 const SET_IDLE_MS = 10_000;
 const MICRO_MOVEMENT_THRESHOLD = 0.9;
 const KG_WEIGHTS = Array.from({ length: 41 }, (_, index) => index * 2.5);
 const LB_WEIGHTS = Array.from({ length: 41 }, (_, index) => index * 5);
 
-const getAccelerationScore = (upPeak: number, downPeak: number) => {
-  if (upPeak <= 0 || downPeak <= 0) return { ratio: 0, score: 1 };
-
-  const ratio = (downPeak / upPeak) * 100;
-  if (ratio < 40) return { ratio, score: 10 };
-  if (ratio < 70) return { ratio, score: 5 };
-  return { ratio, score: 1 };
-};
-
-const getCountScore = (continuousCount: number) => {
-  if (continuousCount >= 10) return 10;
-  if (continuousCount >= 5) return 5;
-  if (continuousCount >= 1) return 2;
+const getRepLevel = (ratio: number): CurrentLevel => {
+  if (ratio >= 2.0) return 3;
+  if (ratio >= 1.5) return 2;
   return 1;
 };
 
-const getLoadLevel = (loadScore: number): LoadLevel => {
-  if (loadScore >= 80) return 5;
-  if (loadScore >= 40) return 4;
-  if (loadScore >= 20) return 3;
-  if (loadScore >= 8) return 2;
+const getCurrentLevelFromRecentReps = (levels: CurrentLevel[]): CurrentLevel => {
+  const recentLevels = levels.slice(-3);
+  if (!recentLevels.length) return 1;
+
+  const averageLevel = recentLevels.reduce((sum, level) => sum + level, 0) / recentLevels.length;
+  if (averageLevel >= 2.0) return 3;
+  if (averageLevel >= 1.5) return 2;
   return 1;
 };
 
@@ -106,27 +102,35 @@ export default function Home() {
   const [isRunning, setIsRunning] = useState(false);
   const [count, setCount] = useState(0);
   const [completedSetCounts, setCompletedSetCounts] = useState<number[]>([]);
-  const [continuousCount, setContinuousCount] = useState(0);
+  const [isStopped, setIsStopped] = useState(false);
   const [sensorPermission, setSensorPermission] = useState<SensorPermission>("unknown");
   const [errorMessage, setErrorMessage] = useState("");
   const [weightIndex, setWeightIndex] = useState(8);
   const [unit, setUnit] = useState<Unit>("kg");
-  const [loadLevel, setLoadLevel] = useState<LoadLevel>(1);
+  const [waveformData, setWaveformData] = useState<number[]>([]);
+  const [repDurations, setRepDurations] = useState<RepDuration[]>([]);
+  const [repLevels, setRepLevels] = useState<CurrentLevel[]>([]);
+  const [currentLevel, setCurrentLevel] = useState<CurrentLevel>(1);
+  const [latestRepLevel, setLatestRepLevel] = useState<CurrentLevel>(1);
+  const [motionPhase, setMotionPhase] = useState<MotionPhase>("idle");
   const [saveStatus, setSaveStatus] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [records, setRecords] = useState<KintoteRecord[]>([]);
   const [historyStatus, setHistoryStatus] = useState("");
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
 
   const isRunningRef = useRef(false);
   const baselineRef = useRef<number | null>(null);
   const smoothedSignalRef = useRef(0);
-  const armedPeaksRef = useRef<Record<PeakDirection, boolean>>({ up: true, down: true });
-  const detectedPeaksRef = useRef<Set<PeakDirection>>(new Set());
   const lastRepTimeRef = useRef<number | null>(null);
-  const currentUpPeakRef = useRef(0);
-  const currentDownPeakRef = useRef(0);
+  const pushStartTimeRef = useRef<number | null>(null);
+  const pullStartTimeRef = useRef<number | null>(null);
+  const pushDurationRef = useRef(0);
+  const pullDurationRef = useRef(0);
+  const motionPhaseRef = useRef<MotionPhase>("idle");
   const setTimerRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const weightOptions = unit === "kg" ? KG_WEIGHTS : LB_WEIGHTS;
   const selectedWeight = weightOptions[weightIndex] ?? weightOptions[0];
@@ -134,7 +138,7 @@ export default function Home() {
   const selectedPart = selectedMachine?.targets ?? "";
   const allSetCounts = count > 0 ? [...completedSetCounts, count] : completedSetCounts;
   const totalRepCount = allSetCounts.reduce((sum, setCount) => sum + setCount, 0);
-  const loadLevelLabel = useMemo(() => `レベル${loadLevel}`, [loadLevel]);
+  const currentLevelLabel = useMemo(() => `Level ${currentLevel}`, [currentLevel]);
   const tabs: { key: AppTab; label: string }[] = [
     { key: "home", label: "ホーム" },
     { key: "measure", label: "計測" },
@@ -164,6 +168,20 @@ export default function Home() {
     }
   }, []);
 
+  const updateMotionPhase = useCallback((nextPhase: MotionPhase) => {
+    motionPhaseRef.current = nextPhase;
+    setMotionPhase(nextPhase);
+  }, []);
+
+  const clearMotionDetectionState = useCallback(() => {
+    lastRepTimeRef.current = null;
+    pushStartTimeRef.current = null;
+    pullStartTimeRef.current = null;
+    pushDurationRef.current = 0;
+    pullDurationRef.current = 0;
+    updateMotionPhase("idle");
+  }, [updateMotionPhase]);
+
   const armSetTimer = useCallback(() => {
     clearSetTimer();
     setTimerRef.current = window.setTimeout(() => {
@@ -175,30 +193,22 @@ export default function Home() {
         }
         return 0;
       });
-      setContinuousCount(0);
-      setLoadLevel(1);
-      detectedPeaksRef.current = new Set();
-      lastRepTimeRef.current = null;
-      currentUpPeakRef.current = 0;
-      currentDownPeakRef.current = 0;
+      clearMotionDetectionState();
       setTimerRef.current = null;
     }, SET_IDLE_MS);
-  }, [clearSetTimer]);
+  }, [clearMotionDetectionState, clearSetTimer]);
 
   const resetRuntimeRefs = useCallback(() => {
     baselineRef.current = null;
     smoothedSignalRef.current = 0;
-    armedPeaksRef.current = { up: true, down: true };
-    detectedPeaksRef.current = new Set();
-    lastRepTimeRef.current = null;
-    currentUpPeakRef.current = 0;
-    currentDownPeakRef.current = 0;
+    clearMotionDetectionState();
     clearSetTimer();
-  }, [clearSetTimer]);
+  }, [clearMotionDetectionState, clearSetTimer]);
 
   const stopMeasurement = useCallback(() => {
     isRunningRef.current = false;
     setIsRunning(false);
+    setIsStopped(true);
     clearSetTimer();
   }, [clearSetTimer]);
 
@@ -207,10 +217,19 @@ export default function Home() {
     resetRuntimeRefs();
     setCount(0);
     setCompletedSetCounts([]);
-    setContinuousCount(0);
-    setLoadLevel(1);
+    setIsStopped(false);
+    setWaveformData([]);
+    setRepDurations([]);
+    setRepLevels([]);
+    setCurrentLevel(1);
+    setLatestRepLevel(1);
     setSaveStatus("");
   }, [resetRuntimeRefs, stopMeasurement]);
+
+  const resetAfterSuccessfulSave = useCallback(() => {
+    resetMeasurement();
+    setErrorMessage("");
+  }, [resetMeasurement]);
 
   const loadHistory = useCallback(async () => {
     setHistoryStatus("");
@@ -227,40 +246,49 @@ export default function Home() {
     }
   }, []);
 
-  const processPeak = useCallback(
-    (direction: PeakDirection, now: number) => {
-      detectedPeaksRef.current.add(direction);
+  const completeRep = useCallback(
+    (now: number) => {
+      const pushDuration = pushDurationRef.current;
+      const pullDuration = pullDurationRef.current;
 
-      if (!detectedPeaksRef.current.has("up") || !detectedPeaksRef.current.has("down")) {
+      if (pushDuration < MIN_PUSH_DURATION_MS || pullDuration < MIN_PHASE_DURATION_MS) {
+        clearMotionDetectionState();
         return;
       }
 
       const previousRepTime = lastRepTimeRef.current;
       if (previousRepTime !== null && now - previousRepTime < MIN_REP_INTERVAL_MS) {
+        updateMotionPhase("cooldown");
         return;
       }
 
+      const ratio = pullDuration / pushDuration;
+      if (!Number.isFinite(ratio)) {
+        clearMotionDetectionState();
+        return;
+      }
+
+      const repLevel = getRepLevel(ratio);
       lastRepTimeRef.current = now;
-      detectedPeaksRef.current = new Set();
-      const { score: nextAccelerationScore } = getAccelerationScore(
-        currentUpPeakRef.current,
-        currentDownPeakRef.current,
-      );
-
       setCount((currentCount) => currentCount + 1);
-      setContinuousCount((currentContinuousCount) => {
-        const nextContinuousCount = currentContinuousCount + 1;
-        const nextCountScore = getCountScore(nextContinuousCount);
-        const nextLoadScore = nextAccelerationScore * nextCountScore;
-
-        setLoadLevel(getLoadLevel(nextLoadScore));
-        return nextContinuousCount;
+      setRepDurations((currentDurations) => [
+        ...currentDurations,
+        { pushDuration, pullDuration, ratio, level: repLevel },
+      ]);
+      setLatestRepLevel(repLevel);
+      setRepLevels((currentLevels) => {
+        const nextLevels = [...currentLevels, repLevel];
+        setCurrentLevel(getCurrentLevelFromRecentReps(nextLevels));
+        return nextLevels;
       });
-      currentUpPeakRef.current = 0;
-      currentDownPeakRef.current = 0;
+      updateMotionPhase("cooldown");
+      pushStartTimeRef.current = null;
+      pullStartTimeRef.current = null;
+      pushDurationRef.current = 0;
+      pullDurationRef.current = 0;
       armSetTimer();
     },
-    [armSetTimer],
+    [armSetTimer, clearMotionDetectionState, updateMotionPhase],
   );
 
   const handleMotion = useCallback(
@@ -278,40 +306,64 @@ export default function Home() {
       const highPassSignal = rawZ - baseline;
       const smoothedSignal = smoothedSignalRef.current + (highPassSignal - smoothedSignalRef.current) * SMOOTHING_ALPHA;
       smoothedSignalRef.current = smoothedSignal;
+      setWaveformData((currentData) => [...currentData.slice(-(WAVEFORM_MAX_POINTS - 1)), smoothedSignal]);
 
-      if (Math.abs(smoothedSignal) < MICRO_MOVEMENT_THRESHOLD) {
+      const now = performance.now();
+      const currentPhase = motionPhaseRef.current;
+
+      if (currentPhase === "cooldown") {
+        if (lastRepTimeRef.current !== null && now - lastRepTimeRef.current < MIN_REP_INTERVAL_MS) return;
+        updateMotionPhase("idle");
+      }
+
+      if (motionPhaseRef.current === "idle") {
+        if (smoothedSignal > PEAK_THRESHOLD) {
+          pushStartTimeRef.current = now;
+          updateMotionPhase("push");
+        }
         return;
       }
 
-      if (smoothedSignal > currentUpPeakRef.current) {
-        currentUpPeakRef.current = smoothedSignal;
+      if (motionPhaseRef.current === "push") {
+        if (smoothedSignal < -PEAK_THRESHOLD) {
+          const pushStartTime = pushStartTimeRef.current;
+          if (pushStartTime === null) {
+            clearMotionDetectionState();
+            return;
+          }
+
+          const pushDuration = now - pushStartTime;
+          if (pushDuration < MIN_PHASE_DURATION_MS) {
+            clearMotionDetectionState();
+            return;
+          }
+
+          pushDurationRef.current = pushDuration;
+          pullStartTimeRef.current = now;
+          updateMotionPhase("pull");
+        } else if (Math.abs(smoothedSignal) < RELEASE_THRESHOLD && pushStartTimeRef.current !== null) {
+          const pushDuration = now - pushStartTimeRef.current;
+          if (pushDuration < MIN_PHASE_DURATION_MS) {
+            clearMotionDetectionState();
+          }
+        }
+        return;
       }
 
-      if (Math.abs(smoothedSignal) > currentDownPeakRef.current && smoothedSignal < 0) {
-        currentDownPeakRef.current = Math.abs(smoothedSignal);
-      }
+      if (motionPhaseRef.current === "pull") {
+        if (smoothedSignal > -RELEASE_THRESHOLD) {
+          const pullStartTime = pullStartTimeRef.current;
+          if (pullStartTime === null) {
+            clearMotionDetectionState();
+            return;
+          }
 
-      const now = performance.now();
-
-      if (smoothedSignal > PEAK_THRESHOLD && armedPeaksRef.current.up) {
-        armedPeaksRef.current.up = false;
-        processPeak("up", now);
-      }
-
-      if (smoothedSignal < RELEASE_THRESHOLD) {
-        armedPeaksRef.current.up = true;
-      }
-
-      if (smoothedSignal < -PEAK_THRESHOLD && armedPeaksRef.current.down) {
-        armedPeaksRef.current.down = false;
-        processPeak("down", now);
-      }
-
-      if (smoothedSignal > -RELEASE_THRESHOLD) {
-        armedPeaksRef.current.down = true;
+          pullDurationRef.current = now - pullStartTime;
+          completeRep(now);
+        }
       }
     },
-    [processPeak],
+    [clearMotionDetectionState, completeRep, updateMotionPhase],
   );
 
   const startMeasurement = useCallback(async () => {
@@ -344,7 +396,9 @@ export default function Home() {
         setSensorPermission("granted");
       }
 
+      setShowCompletionModal(false);
       resetMeasurement();
+      setIsStopped(false);
       isRunningRef.current = true;
       setIsRunning(true);
     } catch {
@@ -368,7 +422,8 @@ export default function Home() {
       setIsSaving(true);
       const data = await saveKintoteRecord(payload);
       console.log("Supabase保存成功:", data);
-      setSaveStatus("保存しました");
+      resetAfterSuccessfulSave();
+      setShowCompletionModal(true);
       await loadHistory();
     } catch (error) {
       console.error("Supabase保存エラー:", error);
@@ -376,14 +431,16 @@ export default function Home() {
     } finally {
       setIsSaving(false);
     }
-  }, [allSetCounts.length, loadHistory, selectedMachineName, selectedPart, selectedWeight, totalRepCount]);
+  }, [allSetCounts.length, loadHistory, resetAfterSuccessfulSave, selectedMachineName, selectedPart, selectedWeight, totalRepCount]);
 
   const handleStopMeasurement = useCallback(() => {
     stopMeasurement();
-    if (totalRepCount > 0) {
-      void handleSaveMeasurement();
-    }
-  }, [handleSaveMeasurement, stopMeasurement, totalRepCount]);
+  }, [stopMeasurement]);
+
+  const handleCompletionHome = useCallback(() => {
+    setShowCompletionModal(false);
+    setActiveTab("home");
+  }, []);
 
   const handleSelectMachine = useCallback((machine: Machine) => {
     setSelectedMachine(machine);
@@ -414,6 +471,53 @@ export default function Home() {
       clearSetTimer();
     };
   }, [clearSetTimer]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const pixelRatio = window.devicePixelRatio || 1;
+    const width = Math.max(Math.floor(rect.width * pixelRatio), 1);
+    const height = Math.max(Math.floor(rect.height * pixelRatio), 1);
+
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    context.clearRect(0, 0, width, height);
+    if (waveformData.length < 2) return;
+
+    const maxAmplitude = Math.max(...waveformData.map((value) => Math.abs(value)), PEAK_THRESHOLD, 1);
+    const points = waveformData.map((value, index) => {
+      const x = (index / (WAVEFORM_MAX_POINTS - 1)) * width;
+      const normalized = Math.max(Math.min(value / maxAmplitude, 1), -1);
+      const y = height / 2 - normalized * (height * 0.34);
+      return { x, y };
+    });
+
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+    context.lineTo(points[points.length - 1].x, height);
+    context.lineTo(points[0].x, height);
+    context.closePath();
+    context.fillStyle = "rgba(255, 255, 255, 0.7)";
+    context.fill();
+
+    context.beginPath();
+    context.moveTo(points[0].x, points[0].y);
+    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 3 * pixelRatio;
+    context.lineJoin = "round";
+    context.lineCap = "round";
+    context.stroke();
+  }, [waveformData]);
 
   return (
     <main className={styles.appShell}>
@@ -492,14 +596,18 @@ export default function Home() {
 
           {errorMessage && <p className={styles.errorMessage} role="alert">{errorMessage}</p>}
 
-          <section className={`${styles.measureArea} ${styles[`loadLevel${loadLevel}`]}`} aria-live="polite">
-            <div className={styles.statusRow}>
-              <span className={isRunning ? styles.runningDot : styles.idleDot} />
-              <span>{isRunning ? "計測中" : totalRepCount > 0 ? "停止中" : "スタート待ち"}</span>
+          <section className={`${styles.measureArea} ${styles[`loadLevel${currentLevel}`]}`} aria-live="polite">
+            <canvas ref={canvasRef} className={styles.waveformCanvas} aria-hidden="true" />
+            <div className={styles.measureContent}>
+              <div className={styles.statusRow}>
+                <span className={isRunning ? styles.runningDot : styles.idleDot} />
+                <span>{isRunning ? `計測中：${motionPhase}` : isStopped && totalRepCount > 0 ? "停止中" : "スタート待ち"}</span>
+              </div>
+              <p className={styles.setCount}>現在 {allSetCounts.length || 1}セット目</p>
+              <div className={styles.countNumber}>{count}</div>
+              <p className={styles.loadLabel}>{currentLevelLabel}</p>
+              <p className={styles.repLevelLabel}>最新rep：Level {latestRepLevel}</p>
             </div>
-            <p className={styles.setCount}>現在 {allSetCounts.length || 1}セット目</p>
-            <div className={styles.countNumber}>{count}</div>
-            <p className={styles.loadLabel}>{loadLevelLabel}</p>
           </section>
 
           <section className={styles.setSummary} aria-label="セットごとの回数">
@@ -527,9 +635,11 @@ export default function Home() {
             >
               {isRunning ? "ストップ" : "スタート"}
             </button>
-            <button className={styles.saveButton} type="button" onClick={handleSaveMeasurement} disabled={isSaving || totalRepCount === 0 || !selectedMachine}>
-              {isSaving ? "保存中..." : "保存"}
-            </button>
+            {isStopped && totalRepCount > 0 && (
+              <button className={styles.saveButton} type="button" onClick={handleSaveMeasurement} disabled={isSaving || !selectedMachine}>
+                {isSaving ? "保存中..." : "保存"}
+              </button>
+            )}
             {saveStatus && <p className={styles.saveStatus}>{saveStatus}</p>}
           </section>
         </section>
@@ -564,6 +674,18 @@ export default function Home() {
             {!records.length && <p className={styles.emptyState}>保存したデータがここに羅列されます。</p>}
           </div>
         </section>
+      )}
+
+      {showCompletionModal && (
+        <div className={styles.modalBackdrop} role="dialog" aria-modal="true" aria-labelledby="completion-title">
+          <div className={styles.completionModal}>
+            <h2 id="completion-title">お疲れ様でした🎉</h2>
+            <p>保存しました</p>
+            <button className={styles.modalButton} type="button" onClick={handleCompletionHome}>
+              器具を選択する
+            </button>
+          </div>
+        </div>
       )}
 
       {activeTab === "analysis" && (
