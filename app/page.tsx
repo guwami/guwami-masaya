@@ -144,11 +144,11 @@ export default function Home() {
 
   const analysisRows = useMemo<AnalysisRow[]>(() => {
     const grouped = records.reduce<Record<string, AnalysisRow>>((accumulator, record) => {
-      const machine = record["Machine Name"] || "マシン未設定";
+      const machine = record.machine_name || "マシン未設定";
       if (!accumulator[machine]) {
         accumulator[machine] = { machine, total: 0, sessions: 0 };
       }
-      accumulator[machine].total += record["Number of times"] ?? 0;
+      accumulator[machine].total += record.number_of_times ?? 0;
       accumulator[machine].sessions += 1;
       return accumulator;
     }, {});
@@ -551,12 +551,12 @@ export default function Home() {
             {records.map((record) => (
               <article className={styles.historyCard} key={`${record.id}-${record.created_at ?? "no-date"}`}>
                 <div>
-                  <p className={styles.historyParts}>{record["Machine Name"] || "マシン未設定"}</p>
-                  <p className={styles.historyMeta}>{record.part || "部位未入力"}</p>
+                  <p className={styles.historyParts}>{record.machine_name || "マシン未設定"}</p>
+                  <p className={styles.historyMeta}>{record.part || "部位未入力"} ・ {record.number_of_set ?? 0}セット</p>
                   <p className={styles.historyMeta}>ID: {record.id} ・ {formatDate(record.created_at)}</p>
                 </div>
                 <div className={styles.historyNumbers}>
-                  <span>{record["Number of times"]}回</span>
+                  <span>{record.number_of_times ?? 0}回</span>
                   <small>{record.weight === null ? "重量なし" : `${record.weight}kg`}</small>
                 </div>
               </article>

@@ -19,7 +19,7 @@ function kintoteErrorResponse(error: unknown, fallbackMessage: string) {
 export async function GET() {
   try {
     const params = new URLSearchParams({
-      select: 'id,"machine Name","number of set",weight,created_at,"number of times",part',
+      select: "id,machine_name,number_of_set,weight,created_at,number_of_times,part",
       order: "created_at.desc",
       limit: "100",
     });
@@ -32,12 +32,12 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const requestPayload = (await request.json()) as KintotePayload;
+    const requestPayload = (await request.json()) as Partial<KintotePayload>;
     const payload = sanitizeKintotePayload(requestPayload);
     console.log("Supabase insert payload:", payload);
 
     const params = new URLSearchParams({
-      select: 'id,"machine Name","number of set",weight,created_at,"number of times",part',
+      select: "id,machine_name,number_of_set,weight,created_at,number_of_times,part",
     });
     const records = await requestSupabaseKintote<KintoteRecord[]>(`/kintote?${params.toString()}`, getConfiguredSupabaseKey(), {
       method: "POST",

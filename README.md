@@ -22,15 +22,15 @@ SUPABASE_ANON_KEY=your_supabase_anon_key
 
 ## `kintote` テーブル
 
-添付画像の構成に合わせて、次の列に保存します。
+現在の Supabase 定義に合わせて、次の列に保存します。
 
 | Supabase列 | 型 | アプリで入力・保存する値 |
 | --- | --- | --- |
 | `id` | `int4` | 記録ID。Supabase 側で自動発行します。 |
-| `Machine Name` | `text` | 選択したマシン名を保存します。 |
-| `number of set` | `int2` | 完了したセット数を保存します。 |
+| `machine_name` | `text` | 選択したマシン名を保存します。 |
+| `number_of_set` | `int2` | 完了したセット数を保存します。 |
 | `weight` | `int2` | 選択した重量を保存します。 |
-| `Number of times` | `int2` | 計測した合計回数を保存します。 |
+| `number_of_times` | `int2` | 計測した合計回数を保存します。 |
 | `part` | `text` | 選択したマシンの対象部位を保存します。 |
 | `created_at` | `timestamptz` | Supabase 側の初期値で保存時刻を記録します。 |
 

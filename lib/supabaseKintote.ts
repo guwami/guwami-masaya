@@ -1,18 +1,18 @@
 export type KintoteRecord = {
   id: number;
-  "Machine Name": string | null;
-  "number of set": number | null;
+  machine_name: string | null;
+  number_of_set: number | null;
   weight: number | null;
   created_at: string | null;
-  "Number of times": number | null;
+  number_of_times: number | null;
   part: string | null;
 };
 
 export type KintotePayload = {
-  "Machine Name": string;
-  "number of set": number;
+  machine_name: string;
+  number_of_set: number;
   weight: number;
-  "Number of times": number;
+  number_of_times: number;
   part: string;
 };
 
@@ -84,10 +84,10 @@ export function createKintotePayload(input: {
   const selectedPart = input.selectedPart.trim();
 
   return {
-    "Machine Name": selectedMachineName,
-    "number of set": Number(input.setCount),
+    machine_name: selectedMachineName,
+    number_of_set: Number(input.setCount),
     weight: Number(input.weight),
-    "Number of times": Number(input.count),
+    number_of_times: Number(input.count),
     part: selectedPart,
   };
 }
@@ -101,7 +101,7 @@ export function validateKintotePayload(input: {
 }): KintotePayload {
   const payload = createKintotePayload(input);
 
-  if (!payload["Machine Name"]) {
+  if (!payload.machine_name) {
     throw new Error("マシン名を入力してください。");
   }
 
@@ -109,11 +109,11 @@ export function validateKintotePayload(input: {
     throw new Error("部位を入力してください。");
   }
 
-  if (!Number.isInteger(payload["number of set"]) || payload["number of set"] < 0 || payload["number of set"] > INT2_MAX) {
+  if (!Number.isInteger(payload.number_of_set) || payload.number_of_set < 0 || payload.number_of_set > INT2_MAX) {
     throw new Error(`セット数は0〜${INT2_MAX}の範囲で保存してください。`);
   }
 
-  if (!Number.isInteger(payload["Number of times"]) || payload["Number of times"] < 0 || payload["Number of times"] > INT2_MAX) {
+  if (!Number.isInteger(payload.number_of_times) || payload.number_of_times < 0 || payload.number_of_times > INT2_MAX) {
     throw new Error(`回数は0〜${INT2_MAX}の範囲で保存してください。`);
   }
 
@@ -122,13 +122,13 @@ export function validateKintotePayload(input: {
   return payload;
 }
 
-export function sanitizeKintotePayload(payload: KintotePayload): KintotePayload {
+export function sanitizeKintotePayload(payload: Partial<KintotePayload>): KintotePayload {
   return {
-    "Machine Name": payload["Machine Name"],
-    "number of set": Number(payload["number of set"]),
-    weight: Number(payload.weight),
-    "Number of times": Number(payload["Number of times"]),
-    part: payload.part,
+    machine_name: String(payload.machine_name ?? ""),
+    number_of_set: Number(payload.number_of_set ?? 0),
+    weight: Number(payload.weight ?? 0),
+    number_of_times: Number(payload.number_of_times ?? 0),
+    part: String(payload.part ?? ""),
   };
 }
 
