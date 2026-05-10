@@ -295,11 +295,32 @@
   font-weight: 900;
 }
 
-.repLevelLabel {
-  margin: 4px 0 0;
-  font-size: 0.78rem;
+.repMetrics {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 5px 10px;
+  max-width: 92%;
+  margin: 5px 0 0;
+  font-size: 0.76rem;
   font-weight: 900;
-  opacity: 0.84;
+  line-height: 1.25;
+  opacity: 0.9;
+}
+
+.debugMetrics {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  left: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px 8px;
+  font-size: 0.58rem;
+  font-weight: 800;
+  line-height: 1.2;
+  opacity: 0.62;
 }
 
 .setSummary {
